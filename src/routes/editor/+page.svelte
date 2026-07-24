@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentProject, viewMode, selectedElementId, selectedRoomId, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { currentProject, viewMode, createDefaultProject, loadProject, selectedTool, placingFurnitureId, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import { localStore } from '$lib/services/datastore';
   import { createProjectFromRoomPlan, isRoomPlanJson } from '$lib/utils/roomplanImport';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
@@ -13,23 +13,13 @@
   import AlignmentToolbar from '$lib/components/editor/AlignmentToolbar.svelte';
   import UndoHistoryPanel from '$lib/components/editor/UndoHistoryPanel.svelte';
   import CommandPalette from '$lib/components/editor/CommandPalette.svelte';
-  import ElevationView from '$lib/components/editor/ElevationView.svelte';
+  // ElevationView is intentionally not imported while the editor is Plan-only.
   import PrintLayout from '$lib/components/editor/PrintLayout.svelte';
   import OnboardingTooltip from '$lib/components/OnboardingTooltip.svelte';
-  import { triggerTip } from '$lib/stores/onboarding.svelte';
 
   let commandPaletteOpen = $state(false);
   let printOpen = $state(false);
 
-  // Lazy-load ThreeViewer to avoid loading Three.js (~1.4MB) until 3D mode is activated
-  let ThreeViewer: any = $state(null);
-  $effect(() => {
-    if (mode === '3d' && !ThreeViewer) {
-      import('$lib/components/viewer3d/ThreeViewer.svelte').then(m => { ThreeViewer = m.default; });
-    }
-  });
-
-  let mode = $state<'2d' | '3d'>('2d');
   let ready = $state(false);
   let showHelp = $state(false);
   let showUndoHistory = $state(false);
@@ -97,19 +87,12 @@
     }
   }
 
-  viewMode.subscribe((m) => {
-    mode = m;
-    if (m === '3d') {
-      // Clear selection when entering 3D — start in view-only mode
-      selectedElementId.set(null);
-      selectedRoomId.set(null);
-      elevationPickMode.set(false);
-      // Onboarding tip for first 3D view
-      triggerTip('first-3d', 200, 80);
-    }
-  });
-
   onMount(() => {
+    // This edition is intentionally 2D-only, including projects saved in 3D mode.
+    viewMode.set('2d');
+    // Elevation is retained in the codebase for future use, but disabled in this workflow.
+    elevationWallId.set(null);
+    elevationPickMode.set(false);
     (async () => {
       const url = new URL(window.location.href);
 
@@ -159,73 +142,64 @@
   });
 </script>
 
-<svelte:window on:keydown={(e) => { if (e.key === 'p' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); printOpen = true; } if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !e.ctrlKey && !e.metaKey && (e.target as HTMLElement)?.tagName !== 'INPUT' && (e.target as HTMLElement)?.tagName !== 'TEXTAREA')) { e.preventDefault(); commandPaletteOpen = !commandPaletteOpen; } if (e.key === '?' && !e.ctrlKey && !e.metaKey) { showHelp = !showHelp; e.preventDefault(); } if (e.key === 'Escape' && showHelp) { showHelp = false; } if (e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey && (e.target as HTMLElement)?.tagName !== 'INPUT') { showLayers = !showLayers; } }} />
+<svelte:window on:keydown={(e) => {
+  const target = e.target as HTMLElement | null;
+  const inFormField = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT' || target?.isContentEditable;
+  if (e.key === 'p' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); printOpen = true; }
+  if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commandPaletteOpen = !commandPaletteOpen; }
+  if (!inFormField && e.key === '/' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); commandPaletteOpen = !commandPaletteOpen; }
+  if (!inFormField && e.key === '?' && !e.ctrlKey && !e.metaKey) { showHelp = !showHelp; e.preventDefault(); }
+  if (e.key === 'Escape' && showHelp) { showHelp = false; }
+  if (!inFormField && e.key === 'l' && !e.ctrlKey && !e.metaKey && !e.altKey) { showLayers = !showLayers; }
+}} />
 
 {#if ready}
   <div class="h-screen flex flex-col overflow-hidden">
     <TopBar />
     <div class="flex flex-1 overflow-hidden">
-      {#if mode === '2d'}
-        <!-- Build panel: inline sidebar on md+, off-canvas drawer on phones -->
-        {#if buildPanelOpen}
-          <div
-            class="md:hidden fixed inset-x-0 top-12 bottom-0 bg-black/40 z-40"
-            onclick={() => buildPanelOpen = false}
-            aria-hidden="true"
-          ></div>
-        {/if}
-        <div class="h-full max-md:fixed max-md:left-0 max-md:top-12 max-md:bottom-0 max-md:h-auto max-md:z-50 max-md:shadow-2xl max-md:transition-transform max-md:duration-200 {buildPanelOpen ? '' : 'max-md:-translate-x-full'}">
-          <BuildPanel />
-        </div>
+      <!-- Build panel: inline sidebar on md+, off-canvas drawer on phones -->
+      {#if buildPanelOpen}
+        <div
+          class="md:hidden fixed inset-x-0 top-12 bottom-0 bg-black/40 z-40"
+          onclick={() => buildPanelOpen = false}
+          aria-hidden="true"
+        ></div>
       {/if}
-      <div class="flex-1 min-w-0 relative">
-        {#if mode === '2d'}
-          <FloorPlanCanvas />
-          <AlignmentToolbar />
-          {#if $elevationWallId}
-            <!-- Integrated elevation view replaces the plan canvas area (sidebars stay) -->
-            <ElevationView />
-          {/if}
-        {:else}
-          {#if ThreeViewer}
-            <ThreeViewer />
-          {:else}
-            <div class="flex items-center justify-center h-full text-slate-400">Loading 3D viewer…</div>
-          {/if}
-        {/if}
+      <div class="h-full max-md:fixed max-md:left-0 max-md:top-12 max-md:bottom-0 max-md:h-auto max-md:z-50 max-md:shadow-2xl max-md:transition-transform max-md:duration-200 {buildPanelOpen ? '' : 'max-md:-translate-x-full'}">
+        <BuildPanel />
       </div>
-      {#if showLayers && mode === '2d'}
+      <div class="flex-1 min-w-0 relative">
+        <FloorPlanCanvas />
+        <AlignmentToolbar />
+      </div>
+      {#if showLayers}
         <LayersPanel />
       {/if}
-      <PropertiesPanel is3D={mode === '3d'} />
+      <PropertiesPanel />
     </div>
   </div>
 
   <!-- Tools drawer FAB (mobile only) -->
-  {#if mode === '2d'}
-    <button
-      class="md:hidden fixed bottom-4 left-4 w-12 h-12 rounded-full bg-blue-600 text-white shadow-lg active:bg-blue-700 transition-colors z-40 flex items-center justify-center"
-      onclick={() => buildPanelOpen = !buildPanelOpen}
-      title="Tools"
-      aria-label="Toggle tools panel"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-    </button>
-  {/if}
+  <button
+    class="md:hidden fixed bottom-4 left-4 w-12 h-12 rounded-full bg-blue-600 text-white shadow-lg active:bg-blue-700 transition-colors z-40 flex items-center justify-center"
+    onclick={() => buildPanelOpen = !buildPanelOpen}
+    title="Tools"
+    aria-label="Toggle tools panel"
+  >
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+  </button>
 
   <!-- Layers toggle button -->
-  {#if mode === '2d'}
-    <button
-      class="max-md:hidden fixed bottom-4 left-14 w-8 h-8 rounded-full shadow-lg hover:bg-slate-600 transition-colors z-50 text-sm"
-      class:bg-blue-600={showLayers}
-      class:text-white={showLayers}
-      class:bg-slate-700={!showLayers}
-      class:text-gray-300={!showLayers}
-      onclick={() => showLayers = !showLayers}
-      title="Layers Panel (L)"
-      aria-label="Toggle Layers Panel"
-    >🗂</button>
-  {/if}
+  <button
+    class="max-md:hidden fixed bottom-4 left-14 w-8 h-8 rounded-full shadow-lg hover:bg-slate-600 transition-colors z-50 text-sm"
+    class:bg-blue-600={showLayers}
+    class:text-white={showLayers}
+    class:bg-slate-700={!showLayers}
+    class:text-gray-300={!showLayers}
+    onclick={() => showLayers = !showLayers}
+    title="Layers Panel (L)"
+    aria-label="Toggle Layers Panel"
+  >🗂</button>
 
   <!-- Undo History toggle button -->
   <button
@@ -270,7 +244,6 @@
                   '',
                   '── TOOLS ──',
                   'V          Select tool',
-                  'W          Wall tool',
                   'D          Door tool',
                   'H          Pan mode',
                   'M          Measure tool',
@@ -296,7 +269,6 @@
                   'Ctrl+⇧+G   Ungroup',
                   '',
                   '── VIEW ──',
-                  'Tab        Toggle 2D/3D',
                   'F          Zoom to fit',
                   'G          Toggle grid',
                   'L          Toggle layers',
@@ -334,7 +306,6 @@
               </div>
               <div class="space-y-1.5 mb-5">
                 <div class="flex justify-between"><span class="text-gray-600">Select tool</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">V</kbd></div>
-                <div class="flex justify-between"><span class="text-gray-600">Wall tool</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">W</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Door tool</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">D</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Pan mode</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">H</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Measure tool</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">M</kbd></div>
@@ -381,7 +352,6 @@
                 <div class="flex-1 h-px bg-blue-100"></div>
               </div>
               <div class="space-y-1.5 mb-5">
-                <div class="flex justify-between"><span class="text-gray-600">Toggle 2D / 3D</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">Tab</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Zoom to fit</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">F</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Toggle grid</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">G</kbd></div>
                 <div class="flex justify-between"><span class="text-gray-600">Toggle layers</span><kbd class="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-slate-700 border border-gray-200">L</kbd></div>

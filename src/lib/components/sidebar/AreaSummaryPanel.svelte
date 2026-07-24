@@ -1,110 +1,66 @@
 <script lang="ts">
-  import { activeFloor, detectedRoomsStore } from '$lib/stores/project';
-  import { projectSettings, formatArea, formatLength } from '$lib/stores/settings';
-  import type { Floor, Room, Wall, RoomCategory } from '$lib/models/types';
+  import { currentProject, detectedRoomsStore } from '$lib/stores/project';
+  import { projectSettings, formatArea } from '$lib/stores/settings';
+  import type { Project, Room } from '$lib/models/types';
 
-  let floor = $state<Floor | null>(null);
+  let project = $state<Project | null>(null);
   let detectedRooms: Room[] = $state([]);
   let settings = $state($projectSettings);
 
-  activeFloor.subscribe((f) => { floor = f; });
+  currentProject.subscribe((value) => { project = value; });
   detectedRoomsStore.subscribe((r) => { detectedRooms = r; });
   projectSettings.subscribe((s) => { settings = s; });
 
-  // Merge floor rooms + detected rooms (detected take precedence for dynamic data)
+  // Summarize the whole project, across every pavimento, while keeping only
+  // rooms whose boundary walls still exist. The detector refreshes geometry
+  // for the active floor; persisted valid rooms cover the other floors.
   let allRooms = $derived.by(() => {
-    const floorRooms = floor?.rooms ?? [];
-    const floorRoomIds = new Set(floorRooms.map(r => r.id));
-    const extra = detectedRooms.filter(r => !floorRoomIds.has(r.id));
-    return [...floorRooms, ...extra];
+    if (!project) return [];
+    const projectRooms: Room[] = [];
+
+    for (const floor of project.floors) {
+      const currentWallIds = new Set(floor.walls.map((wall) => wall.id));
+      const isCurrentRoom = (room: Room) =>
+        room.walls.length >= 3
+        && room.walls.every((wallId) => currentWallIds.has(wallId));
+      const floorRooms = new Map<string, Room>();
+
+      for (const room of floor.rooms) {
+        if (isCurrentRoom(room)) floorRooms.set(room.id, room);
+      }
+      if (floor.id === project.activeFloorId) {
+        // Current detected geometry/area replaces matching saved metadata only
+        // on the open floor. Other floors retain their own saved room data.
+        for (const room of detectedRooms) {
+          if (isCurrentRoom(room)) floorRooms.set(room.id, room);
+        }
+      }
+      projectRooms.push(...floorRooms.values());
+    }
+    return projectRooms;
   });
 
   let totalArea = $derived(allRooms.reduce((sum: number, r: Room) => sum + r.area, 0));
 
-  let roomsByCategory = $derived.by(() => {
-    const cats: Record<RoomCategory, Room[]> = { indoor: [], outdoor: [], garage: [], utility: [] };
-    for (const r of allRooms) {
-      const cat = r.roomType ?? 'indoor';
-      cats[cat].push(r);
-    }
-    return cats;
-  });
-
-  let categoryTotals = $derived.by(() => {
-    const cats = roomsByCategory;
-    const result: { category: RoomCategory; label: string; area: number; count: number }[] = [];
-    const labels: Record<RoomCategory, string> = { indoor: '🏠 Indoor', outdoor: '🌳 Outdoor', garage: '🚗 Garage', utility: '🔧 Utility' };
-    for (const [cat, rooms] of Object.entries(cats) as [RoomCategory, Room[]][]) {
-      if (rooms.length > 0) {
-        result.push({ category: cat, label: labels[cat], area: rooms.reduce((s: number, r: Room) => s + r.area, 0), count: rooms.length });
-      }
-    }
-    return result;
-  });
-
-  // Quick stats
-  let totalWalls = $derived(floor?.walls.length ?? 0);
-  let totalDoors = $derived(floor?.doors.length ?? 0);
-  let totalWindows = $derived(floor?.windows.length ?? 0);
-
-  function calcWallLength(wall: Wall): number {
-    if (wall.curvePoint) {
-      let len = 0; const N = 20;
-      let px = wall.start.x, py = wall.start.y;
-      for (let i = 1; i <= N; i++) {
-        const t = i / N, mt = 1 - t;
-        const nx = mt*mt*wall.start.x + 2*mt*t*wall.curvePoint.x + t*t*wall.end.x;
-        const ny = mt*mt*wall.start.y + 2*mt*t*wall.curvePoint.y + t*t*wall.end.y;
-        len += Math.hypot(nx - px, ny - py); px = nx; py = ny;
-      }
-      return len;
-    }
-    return Math.hypot(wall.end.x - wall.start.x, wall.end.y - wall.start.y);
-  }
-
-  let totalWallLength = $derived((floor?.walls ?? []).reduce((s: number, w: Wall) => s + calcWallLength(w), 0));
 </script>
 
 <div class="space-y-3">
   <!-- Quick Stats -->
   <div class="grid grid-cols-2 gap-2">
-    <div class="bg-blue-50 rounded-lg p-2 text-center">
-      <div class="text-lg font-bold text-blue-700">{allRooms.length}</div>
-      <div class="text-[10px] text-blue-500">Rooms</div>
+    <div class="bg-blue-700 rounded-lg p-3 text-center shadow-sm">
+      <div class="text-lg font-bold text-white">{allRooms.length}</div>
+      <div class="text-[10px] font-medium text-blue-100">Ambientes</div>
     </div>
-    <div class="bg-green-50 rounded-lg p-2 text-center">
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
       <div class="text-lg font-bold text-green-700">{formatArea(totalArea, settings.units)}</div>
-      <div class="text-[10px] text-green-500">Total Area</div>
-    </div>
-    <div class="bg-amber-50 rounded-lg p-2 text-center">
-      <div class="text-sm font-bold text-amber-700">{totalDoors}D / {totalWindows}W</div>
-      <div class="text-[10px] text-amber-500">Doors / Windows</div>
-    </div>
-    <div class="bg-purple-50 rounded-lg p-2 text-center">
-      <div class="text-sm font-bold text-purple-700">{formatLength(totalWallLength, settings.units)}</div>
-      <div class="text-[10px] text-purple-500">Wall Length</div>
+      <div class="text-[10px] text-green-500">Área total</div>
     </div>
   </div>
-
-  <!-- Category Breakdown -->
-  {#if categoryTotals.length > 0}
-    <div>
-      <h4 class="text-xs font-semibold text-gray-500 uppercase mb-1.5">By Category</h4>
-      <div class="space-y-1">
-        {#each categoryTotals as cat}
-          <div class="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1.5">
-            <span class="text-gray-700">{cat.label} <span class="text-gray-400">({cat.count})</span></span>
-            <span class="font-medium text-gray-800">{formatArea(cat.area, settings.units)}</span>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   <!-- Per-Room Breakdown -->
   {#if allRooms.length > 0}
     <div>
-      <h4 class="text-xs font-semibold text-gray-500 uppercase mb-1.5">Room Breakdown</h4>
+      <h4 class="text-xs font-semibold text-gray-500 uppercase mb-1.5">Detalhamento dos ambientes</h4>
       <div class="space-y-0.5">
         {#each allRooms as room}
           {@const pct = totalArea > 0 ? (room.area / totalArea * 100) : 0}
@@ -124,6 +80,6 @@
       </div>
     </div>
   {:else}
-    <p class="text-xs text-gray-400 text-center py-4">No rooms detected yet.<br/>Draw walls to create rooms.</p>
+    <p class="text-xs text-gray-400 text-center py-4">Nenhum ambiente encontrado.<br/>Adicione ambientes para visualizar o resumo.</p>
   {/if}
 </div>

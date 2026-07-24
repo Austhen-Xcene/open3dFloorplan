@@ -1,19 +1,21 @@
 <script lang="ts">
-  import { selectedTool, placingFurnitureId, placingDoorType, placingWindowType, placingStair, addStair, placingColumn, placingColumnShape, activeFloor, setBackgroundImage, canvasCamX, canvasCamY, placingEntourageId, addCustomEntourage } from '$lib/stores/project';
+  import { selectedTool, placingFurnitureId, placingDoorType, placingWindowType, activeFloor, canvasCamX, canvasCamY, placingEntourageId, addCustomEntourage, selectedRoomId } from '$lib/stores/project';
   import type { Tool } from '$lib/stores/project';
   import type { Door, Window as Win, CustomEntourageDef } from '$lib/models/types';
   import { entourageCatalog, entourageCategories } from '$lib/utils/entourageCatalog';
-  import { roomPresets, placePreset } from '$lib/utils/roomPresets';
-  import { roomTemplates, placeRoomTemplate } from '$lib/utils/roomTemplates';
+  import { placeRectangularEnvironment } from '$lib/utils/roomPresets';
   import { furnitureCatalog, furnitureCategories } from '$lib/utils/furnitureCatalog';
   import type { FurnitureDef } from '$lib/utils/furnitureCatalog';
   import { getModelFile, generateThumbnail, getThumbnail, preloadThumbnails } from '$lib/utils/furnitureThumbnails';
   import { onMount } from 'svelte';
-  import { createProjectFromRoomPlan, extractRoomJsonFromZip, ORTHO_VERSION } from '$lib/utils/roomplanImport';
-  import { currentProject, loadProject } from '$lib/stores/project';
+  import { get } from 'svelte/store';
+  import { currentProject } from '$lib/stores/project';
 
   // AreaSummaryPanel moved to top bar dialog
-  let activeTab = $state<'draw' | 'rooms' | 'objects'>('draw');
+  let activeTab = $state<'draw' | 'rooms' | 'objects'>('rooms');
+  // Entourage and all of its child controls are retained for future use,
+  // but hidden from the current Objects workflow.
+  const ENABLE_ENTOURAGE = false;
   let constructionOpen = $state(true);
   let selectedCategory = $state<string>('All');
   let thumbsReady = $state(0); // increment to trigger reactivity
@@ -26,14 +28,6 @@
     }
   });
 
-  // RoomPlan import dialog state
-  let showImportDialog = $state(false);
-  let importFileName = $state('');
-  let importJsonData: any = $state(null);
-  let optStraighten = $state(true);
-  let optOrthogonal = $state(true);
-  let optMergeDistance = $state(15);
-
   function setTool(tool: Tool) {
     selectedTool.set(tool);
     placingFurnitureId.set(null);
@@ -45,15 +39,48 @@
   let currentPlacing = $state<string | null>(null);
   placingFurnitureId.subscribe((id) => { currentPlacing = id; });
 
-  function onPresetClick(presetId: string, templateName?: string) {
-    const preset = roomPresets.find(p => p.id === presetId);
-    if (preset) {
-      let cx = 0, cy = 0;
-      canvasCamX.subscribe(v => { cx = v; })();
-      canvasCamY.subscribe(v => { cy = v; })();
-      const template = templateName ? roomTemplates.find(t => t.name === templateName) ?? null : null;
-      placeRoomTemplate(preset, { x: cx, y: cy }, template);
+  let roomName = $state('');
+  let roomWidth = $state(4);
+  let roomLength = $state(3);
+  let roomError = $state('');
+  let roomFeedback = $state('');
+
+  function addEnvironment() {
+    const name = roomName.trim();
+    if (!name) {
+      roomError = 'Informe o nome do ambiente.';
+      roomFeedback = '';
+      return;
     }
+    if (!Number.isFinite(roomWidth) || !Number.isFinite(roomLength) || roomWidth < 0.5 || roomLength < 0.5 || roomWidth > 50 || roomLength > 50) {
+      roomError = 'Use medidas entre 0,50 m e 50 m.';
+      roomFeedback = '';
+      return;
+    }
+
+    let cx = 0;
+    let cy = 0;
+    canvasCamX.subscribe((value) => { cx = value; })();
+    canvasCamY.subscribe((value) => { cy = value; })();
+
+    const widthCm = Math.round(roomWidth * 100);
+    const lengthCm = Math.round(roomLength * 100);
+    const floor = get(activeFloor);
+    const roomId = placeRectangularEnvironment(
+      { name, color: '#dbeafe', roomType: 'indoor' },
+      { x: cx, y: cy },
+      widthCm,
+      lengthCm,
+      floor?.walls ?? [],
+      floor?.rooms ?? [],
+    );
+    selectedRoomId.set(roomId);
+    selectedTool.set('select');
+    roomError = '';
+    roomFeedback = `${name} inserido: ${roomWidth.toFixed(2)} × ${roomLength.toFixed(2)} m`;
+    roomName = '';
+    roomWidth = 4;
+    roomLength = 3;
   }
 
   function onFurnitureClick(item: FurnitureDef) {
@@ -151,9 +178,6 @@
     setTool('window');
   }
 
-  let isPlacingStair = $state(false);
-  placingStair.subscribe(v => { isPlacingStair = v; });
-
   // Entourage (2D presentation symbols)
   let placingEntId = $state<string | null>(null);
   placingEntourageId.subscribe(v => { placingEntId = v; });
@@ -184,97 +208,6 @@
       img.src = dataUrl;
     };
     reader.readAsDataURL(file);
-  }
-
-  let isPlacingColumn = $state(false);
-  placingColumn.subscribe(v => { isPlacingColumn = v; });
-
-  function onPlaceStair() {
-    placingStair.set(true);
-    selectedTool.set('select');
-    placingFurnitureId.set(null);
-  }
-
-  function onPlaceColumn(shape: 'round' | 'square') {
-    placingColumn.set(true);
-    placingColumnShape.set(shape);
-    selectedTool.set('select');
-    placingFurnitureId.set(null);
-  }
-
-  function onImportImage() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Warning: Image is larger than 5MB. This may slow down the application.');
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        setBackgroundImage({
-          dataUrl,
-          position: { x: 0, y: 0 },
-          scale: 1,
-          opacity: 0.4,
-          rotation: 0,
-          locked: false,
-        });
-      };
-      reader.readAsDataURL(file);
-    };
-    input.click();
-  }
-
-  async function onImportRoomPlan() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json,.zip';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      try {
-        let jsonData: any;
-        if (file.name.endsWith('.zip')) {
-          jsonData = await extractRoomJsonFromZip(file);
-        } else {
-          const text = await file.text();
-          jsonData = JSON.parse(text);
-        }
-        importJsonData = jsonData;
-        importFileName = file.name.replace(/\.(json|zip)$/, '');
-        showImportDialog = true;
-      } catch (e: any) {
-        alert('Failed to read RoomPlan file: ' + e.message);
-      }
-    };
-    input.click();
-  }
-
-  function confirmImport() {
-    if (!importJsonData) return;
-    try {
-      // Create a new project for the imported data instead of merging into current
-      const projectName = importFileName ? importFileName.replace(/\.(json|zip)$/i, '') : 'RoomPlan Import';
-      const newProject = createProjectFromRoomPlan(importJsonData, projectName, {
-        straighten: optStraighten,
-        orthogonal: optOrthogonal,
-        mergeDistance: optMergeDistance,
-      });
-      loadProject(newProject);
-    } catch (e: any) {
-      alert('Failed to import RoomPlan: ' + e.message);
-    }
-    showImportDialog = false;
-    importJsonData = null;
-  }
-
-  function cancelImport() {
-    showImportDialog = false;
-    importJsonData = null;
   }
 
   // --- Hover Preview Tooltip ---
@@ -336,152 +269,22 @@
     <button
       class="flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide {activeTab === 'draw' ? 'text-slate-800 border-b-2 border-blue-500 bg-blue-50' : 'text-gray-500 hover:text-gray-700'}"
       onclick={() => activeTab = 'draw'}
-    >Build</button>
+    >Construir</button>
     <button
       class="flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide {activeTab === 'rooms' ? 'text-slate-800 border-b-2 border-blue-500 bg-blue-50' : 'text-gray-500 hover:text-gray-700'}"
       onclick={() => activeTab = 'rooms'}
-    >Rooms</button>
+    >Ambientes</button>
     <button
       class="flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide {activeTab === 'objects' ? 'text-slate-800 border-b-2 border-blue-500 bg-blue-50' : 'text-gray-500 hover:text-gray-700'}"
       onclick={() => activeTab = 'objects'}
-    >Objects</button>
+    >Objetos</button>
   </div>
 
   <div class="flex-1 overflow-y-auto p-3">
     {#if activeTab === 'draw'}
       <div class="space-y-1">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Tools</h3>
         <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'select' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={() => setTool('select')}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'select' ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Select <span class="text-gray-400 text-xs ml-1">V</span></div>
-            <div class="text-xs text-gray-400">Click to select elements</div>
-          </div>
-        </button>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'wall' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={() => setTool('wall')}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'wall' ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1"/><line x1="7" y1="8" x2="7" y2="16"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="17" y1="8" x2="17" y2="16"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Draw Wall <span class="text-gray-400 text-xs ml-1">W</span></div>
-            <div class="text-xs text-gray-400">Click to draw, dbl-click to finish</div>
-          </div>
-        </button>
-
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3">Structure</h3>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {isPlacingStair ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={onPlaceStair}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {isPlacingStair ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5h-5V2h-3v6h-4V5H7v6H2v3h5v3h3v-3h4v3h3v-6h5z"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Add Stairs</div>
-            <div class="text-xs text-gray-400">Click to place stairs</div>
-          </div>
-        </button>
-
-        <div class="flex gap-2">
-          <button
-            class="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-colors {isPlacingColumn ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-            onclick={() => onPlaceColumn('round')}
-          >
-            <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {isPlacingColumn ? 'bg-blue-100' : ''}">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
-            </div>
-            <div class="text-left">
-              <div class="font-medium text-xs">Round Column</div>
-            </div>
-          </button>
-          <button
-            class="flex-1 flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm transition-colors {isPlacingColumn ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-            onclick={() => onPlaceColumn('square')}
-          >
-            <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {isPlacingColumn ? 'bg-blue-100' : ''}">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12"/><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
-            </div>
-            <div class="text-left">
-              <div class="font-medium text-xs">Square Column</div>
-            </div>
-          </button>
-        </div>
-
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3">Annotate</h3>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'text' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={() => setTool('text')}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'text' ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="8" y1="20" x2="16" y2="20"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Text Label</div>
-            <div class="text-xs text-gray-400">Add text annotations (T)</div>
-          </div>
-        </button>
-
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'annotate' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={() => setTool('annotate')}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'annotate' ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><line x1="16" y1="5" x2="22" y2="5"/><line x1="19" y1="2" x2="19" y2="8"/><line x1="3" y1="12" x2="12" y2="12"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Dimension</div>
-            <div class="text-xs text-gray-400">Add dimension annotations (N)</div>
-          </div>
-        </button>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors {currentTool === 'measure' ? 'bg-blue-50 text-slate-800 ring-1 ring-blue-200' : 'hover:bg-gray-50 text-gray-700'}"
-          onclick={() => setTool('measure')}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center {currentTool === 'measure' ? 'bg-blue-100' : ''}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h5l2-7 4 14 2-7h7"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Measure</div>
-            <div class="text-xs text-gray-400">Measure distances (M)</div>
-          </div>
-        </button>
-
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3">Import</h3>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors hover:bg-gray-50 text-gray-700"
-          onclick={onImportImage}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Import Image</div>
-            <div class="text-xs text-gray-400">Floor plan background</div>
-          </div>
-        </button>
-        <button
-          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors hover:bg-gray-50 text-gray-700"
-          onclick={onImportRoomPlan}
-        >
-          <div class="w-9 h-9 rounded-lg bg-gray-100 flex items-center justify-center">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          </div>
-          <div class="text-left">
-            <div class="font-medium">Import RoomPlan</div>
-            <div class="text-xs text-gray-400">iOS LiDAR scan (.json/.zip)</div>
-          </div>
-        </button>
-
-        <button
-          class="w-full flex items-center justify-between px-1 py-2 mt-3"
+          class="w-full flex items-center justify-between px-1 py-2"
           onclick={() => constructionOpen = !constructionOpen}
         >
           <h3 class="text-xs font-semibold text-gray-400 uppercase">Doors</h3>
@@ -527,49 +330,64 @@
       </div>
 
     {:else if activeTab === 'rooms'}
-      <div class="space-y-2">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Room Presets</h3>
-        <p class="text-xs text-gray-400 mb-3">Click to add a room shape to the canvas</p>
-        <div class="grid grid-cols-2 gap-2">
-          {#each roomPresets as preset}
-            <button
-              class="flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 border-gray-100 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-grab active:cursor-grabbing"
-              onclick={() => onPresetClick(preset.id)}
-              draggable="true"
-              ondragstart={(e) => { e.dataTransfer?.setData('application/o3d-type', 'room'); e.dataTransfer?.setData('application/o3d-id', preset.id); }}
-            >
-              <div class="w-12 h-12 rounded-lg bg-gray-50 flex items-center justify-center text-2xl font-mono">{preset.icon}</div>
-              <span class="text-xs font-medium text-gray-600">{preset.name}</span>
-            </button>
-          {/each}
-        </div>
-
-        <hr class="my-3 border-gray-200" />
-
-        <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Room Templates</h3>
-        <p class="text-xs text-gray-400 mb-3">Pre-furnished rooms — walls + furniture in one click</p>
-        <div class="grid grid-cols-2 gap-2">
-          {#each roomTemplates as tmpl}
-            <button
-              class="flex flex-col items-center gap-1.5 p-3 rounded-lg border-2 border-gray-100 hover:border-green-300 hover:bg-green-50 transition-colors cursor-grab active:cursor-grabbing"
-              onclick={() => onPresetClick(tmpl.presetId, tmpl.name)}
-              draggable="true"
-              ondragstart={(e) => { e.dataTransfer?.setData('application/o3d-type', 'room-template'); e.dataTransfer?.setData('application/o3d-id', tmpl.name); }}
-            >
-              <div class="w-12 h-12 rounded-lg bg-green-50 flex items-center justify-center text-lg">
-                {#if tmpl.name === 'Living Room'}🛋️
-                {:else if tmpl.name === 'Bedroom'}🛏️
-                {:else if tmpl.name === 'Kitchen'}🍳
-                {:else if tmpl.name === 'Bathroom'}🛁
-                {:else if tmpl.name === 'Office'}🖥️
-                {:else if tmpl.name === 'Dining Room'}🍽️
-                {:else}🏠
-                {/if}
-              </div>
-              <span class="text-xs font-medium text-gray-600">{tmpl.name}</span>
-              <span class="text-[10px] text-gray-400">{tmpl.furniture.length} items</span>
-            </button>
-          {/each}
+      <div>
+        <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+          <div>
+            <h3 class="text-sm font-semibold text-gray-800">Adicionar ambiente</h3>
+            <p class="mt-0.5 text-xs text-gray-400">
+              Informe o nome e as medidas do retângulo.
+            </p>
+          </div>
+          <label class="block">
+            <span class="block text-[11px] font-medium text-gray-600 mb-1">Nome do ambiente</span>
+            <input
+              type="text"
+              maxlength="60"
+              placeholder="Ex.: Quarto menino"
+              bind:value={roomName}
+              onkeydown={(event) => { if (event.key === 'Enter') addEnvironment(); }}
+              class="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="block">
+              <span class="block text-[11px] font-medium text-gray-600 mb-1">Largura (m)</span>
+              <input
+                type="number"
+                min="0.5"
+                max="50"
+                step="0.1"
+                bind:value={roomWidth}
+                class="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+            <label class="block">
+              <span class="block text-[11px] font-medium text-gray-600 mb-1">Comprimento (m)</span>
+              <input
+                type="number"
+                min="0.5"
+                max="50"
+                step="0.1"
+                bind:value={roomLength}
+                class="w-full rounded-lg border border-gray-300 bg-white px-2.5 py-2 text-sm text-gray-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              />
+            </label>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-gray-500">
+            <span>Área</span>
+            <strong class="text-gray-700">{(roomWidth * roomLength).toFixed(2)} m²</strong>
+          </div>
+          <button
+            class="w-full rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:bg-blue-800"
+            onclick={addEnvironment}
+          >
+            Adicionar ambiente
+          </button>
+          {#if roomError}
+            <p class="text-xs text-red-600" role="alert">{roomError}</p>
+          {:else if roomFeedback}
+            <p class="text-xs text-emerald-700" role="status">{roomFeedback}</p>
+          {/if}
         </div>
       </div>
 
@@ -694,52 +512,54 @@
           {/each}
         </div>
 
-        <!-- Entourage: 2D presentation symbols (people, cars, planting) -->
-        <div class="pt-3 mt-2 border-t border-gray-100">
-          <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Entourage</h3>
-          {#each entourageCategories as cat}
-            {@const defs = entourageCatalog.filter(d => d.category === cat.key)}
-            <div class="mb-2">
-              <span class="text-[10px] font-medium text-gray-500">{cat.icon} {cat.label}</span>
-              <div class="grid grid-cols-3 gap-1.5 mt-1">
-                {#each defs as def}
-                  <button
-                    class="p-1.5 rounded-lg border text-center hover:border-blue-300 hover:bg-blue-50 transition-colors {placingEntId === def.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200'}"
-                    title="{def.name} ({def.width} cm) — click canvas to place, Shift-click to stamp several"
-                    onclick={() => armEntourage(def.id)}
-                  >
-                    <svg viewBox="0 0 100 {Math.round(100 * def.aspect)}" class="w-full h-8 text-gray-600" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-                      {#each def.paths as d}<path d={d} />{/each}
-                    </svg>
-                    <span class="text-[9px] text-gray-500 leading-tight block truncate">{def.name}</span>
-                  </button>
-                {/each}
+        {#if ENABLE_ENTOURAGE}
+          <!-- Entourage and children disabled for the simplified Objects workflow. -->
+          <div class="pt-3 mt-2 border-t border-gray-100">
+            <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Entourage</h3>
+            {#each entourageCategories as cat}
+              {@const defs = entourageCatalog.filter(d => d.category === cat.key)}
+              <div class="mb-2">
+                <span class="text-[10px] font-medium text-gray-500">{cat.icon} {cat.label}</span>
+                <div class="grid grid-cols-3 gap-1.5 mt-1">
+                  {#each defs as def}
+                    <button
+                      class="p-1.5 rounded-lg border text-center hover:border-blue-300 hover:bg-blue-50 transition-colors {placingEntId === def.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200'}"
+                      title="{def.name} ({def.width} cm) — click canvas to place, Shift-click to stamp several"
+                      onclick={() => armEntourage(def.id)}
+                    >
+                      <svg viewBox="0 0 100 {Math.round(100 * def.aspect)}" class="w-full h-8 text-gray-600" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+                        {#each def.paths as d}<path d={d} />{/each}
+                      </svg>
+                      <span class="text-[9px] text-gray-500 leading-tight block truncate">{def.name}</span>
+                    </button>
+                  {/each}
+                </div>
               </div>
-            </div>
-          {/each}
-          {#if customEntDefs.length}
-            <div class="mb-2">
-              <span class="text-[10px] font-medium text-gray-500">🖼️ Custom</span>
-              <div class="grid grid-cols-3 gap-1.5 mt-1">
-                {#each customEntDefs as def}
-                  <button
-                    class="p-1.5 rounded-lg border text-center hover:border-blue-300 hover:bg-blue-50 transition-colors {placingEntId === def.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200'}"
-                    title={def.name}
-                    onclick={() => armEntourage(def.id)}
-                  >
-                    <img src={def.dataUrl} alt={def.name} class="w-full h-8 object-contain" />
-                    <span class="text-[9px] text-gray-500 leading-tight block truncate">{def.name}</span>
-                  </button>
-                {/each}
+            {/each}
+            {#if customEntDefs.length}
+              <div class="mb-2">
+                <span class="text-[10px] font-medium text-gray-500">🖼️ Custom</span>
+                <div class="grid grid-cols-3 gap-1.5 mt-1">
+                  {#each customEntDefs as def}
+                    <button
+                      class="p-1.5 rounded-lg border text-center hover:border-blue-300 hover:bg-blue-50 transition-colors {placingEntId === def.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200'}"
+                      title={def.name}
+                      onclick={() => armEntourage(def.id)}
+                    >
+                      <img src={def.dataUrl} alt={def.name} class="w-full h-8 object-contain" />
+                      <span class="text-[9px] text-gray-500 leading-tight block truncate">{def.name}</span>
+                    </button>
+                  {/each}
+                </div>
               </div>
-            </div>
-          {/if}
-          <button
-            class="w-full py-1.5 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
-            onclick={() => entourageFileInput?.click()}
-          >+ Upload PNG symbol</button>
-          <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" bind:this={entourageFileInput} onchange={onEntourageUpload} />
-        </div>
+            {/if}
+            <button
+              class="w-full py-1.5 border border-dashed border-gray-300 rounded-lg text-xs text-gray-500 hover:border-blue-300 hover:text-blue-600 transition-colors"
+              onclick={() => entourageFileInput?.click()}
+            >+ Upload PNG symbol</button>
+            <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" bind:this={entourageFileInput} onchange={onEntourageUpload} />
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -773,44 +593,6 @@
         <div class="text-xs text-gray-500">
           {item.width} × {item.depth} × {item.height} cm
         </div>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- RoomPlan Import Options Dialog -->
-{#if showImportDialog}
-  <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onclick={cancelImport}>
-    <div class="bg-white rounded-xl shadow-2xl w-80 p-5" onclick={(e) => e.stopPropagation()}>
-      <h3 class="text-sm font-bold text-gray-800 mb-1">Import RoomPlan</h3>
-      <p class="text-xs text-gray-400 mb-4">{importFileName}</p>
-
-      <div class="space-y-3">
-        <label class="flex items-start gap-2.5 cursor-pointer">
-          <input type="checkbox" bind:checked={optStraighten} class="accent-blue-500 mt-0.5" />
-          <div>
-            <div class="text-sm font-medium text-gray-700">Straighten walls</div>
-            <div class="text-xs text-gray-400">Snap near-horizontal/vertical walls to axis</div>
-          </div>
-        </label>
-
-        <label class="flex items-start gap-2.5 cursor-pointer">
-          <input type="checkbox" bind:checked={optOrthogonal} class="accent-blue-500 mt-0.5" />
-          <div>
-            <div class="text-sm font-medium text-gray-700">Enforce orthogonal <span class="text-xs text-blue-400 font-mono">{ORTHO_VERSION}</span></div>
-            <div class="text-xs text-gray-400">Force all walls to 90°/180° angles</div>
-          </div>
-        </label>
-
-        <label class="block">
-          <div class="text-xs text-gray-500 mb-1">Corner merge distance (cm)</div>
-          <input type="number" bind:value={optMergeDistance} min="0" max="50" step="5" class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
-        </label>
-      </div>
-
-      <div class="flex gap-2 mt-5">
-        <button onclick={cancelImport} class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors">Cancel</button>
-        <button onclick={confirmImport} class="flex-1 px-3 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">Import</button>
       </div>
     </div>
   </div>

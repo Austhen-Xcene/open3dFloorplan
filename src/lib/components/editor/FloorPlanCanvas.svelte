@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { activeFloor, selectedTool, selectedElementId, selectedElementIds, selectedRoomId, addWall, addDoor, addWindow, updateWall, moveWallEndpoint, updateDoor, updateWindow, addFurniture, moveFurniture, commitFurnitureMove, rotateFurniture, setFurnitureRotation, scaleFurniture, removeElement, placingFurnitureId, placingRotation, placingDoorType, placingWindowType, detectedRoomsStore, duplicateDoor, duplicateWindow, duplicateFurniture, duplicateWall, moveWallParallel, splitWall, snapEnabled, placingStair, addStair, moveStair, updateStair, placingColumn, placingColumnShape, addColumn, moveColumn, updateColumn, calibrationMode, calibrationPoints, updateBackgroundImage, setBackgroundImage, canvasZoom, canvasCamX, canvasCamY, panMode, showFurnitureStore, addGuide, moveGuide, removeGuide, beginUndoGroup, endUndoGroup, layerVisibility, updateRoom, addMeasurement, removeMeasurement, addAnnotation, removeAnnotation, updateAnnotation, addTextAnnotation, removeTextAnnotation, updateTextAnnotation, moveTextAnnotation, toggleFurnitureLock, createGroup, ungroupElements, findGroupForElement, placingEntourageId, addEntourageItem, moveEntourage, resizeEntourage, currentProject, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { activeFloor, selectedTool, selectedElementId, selectedElementIds, selectedRoomId, addWall, addDoor, addWindow, updateWall, moveWallEndpoint, moveWallsTogether, resolveRoomOverlap, updateDoor, updateWindow, addFurniture, moveFurniture, commitFurnitureMove, rotateFurniture, rotateRoom90, setFurnitureRotation, scaleFurniture, removeElement, placingFurnitureId, placingRotation, placingDoorType, placingWindowType, detectedRoomsStore, duplicateDoor, duplicateWindow, duplicateFurniture, duplicateWall, moveWallParallel, splitWall, snapEnabled, placingStair, addStair, moveStair, updateStair, placingColumn, placingColumnShape, addColumn, moveColumn, updateColumn, calibrationMode, calibrationPoints, updateBackgroundImage, setBackgroundImage, canvasZoom, canvasCamX, canvasCamY, panMode, showFurnitureStore, addGuide, moveGuide, removeGuide, beginUndoGroup, endUndoGroup, layerVisibility, updateRoom, addMeasurement, removeMeasurement, addAnnotation, removeAnnotation, updateAnnotation, addTextAnnotation, removeTextAnnotation, updateTextAnnotation, moveTextAnnotation, toggleFurnitureLock, createGroup, ungroupElements, findGroupForElement, placingEntourageId, addEntourageItem, moveEntourage, resizeEntourage, currentProject, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import type { Point, Wall, Door, Window as Win, FurnitureItem, Stair, Column, GuideLine, Measurement, Annotation, TextAnnotation, CustomEntourageDef } from '$lib/models/types';
   import type { Floor, Room } from '$lib/models/types';
   import { detectRooms, getRoomPolygon, roomCentroid } from '$lib/utils/roomDetection';
@@ -44,11 +44,6 @@
   let typedWallLength = $state('');
   let wallSequenceFirst: Point | null = $state(null);
   let mousePos: Point = $state({ x: 0, y: 0 });
-
-  // Inline room name editing
-  let editingRoomId: string | null = $state(null);
-  let editingRoomPos: { x: number; y: number } = $state({ x: 0, y: 0 });
-  let editingRoomName: string = $state('');
 
   // Pan state
   let isPanning = $state(false);
@@ -333,6 +328,23 @@
       }
     }
     return results;
+  }
+
+  /**
+   * Generated environments keep independent coincident walls at their
+   * boundaries. When editing one wall, only stretch walls owned by the same
+   * saved environment so the neighbour's boundary remains untouched.
+   */
+  function findOwnedConnectedEndpoints(
+    pt: Point,
+    wallId: string,
+  ): { wallId: string; endpoint: 'start' | 'end' }[] {
+    const connected = findConnectedEndpoints(pt, wallId);
+    if (!currentFloor) return connected;
+    const owner = currentFloor.rooms.find((room) => room.walls.includes(wallId));
+    if (!owner) return connected;
+    const ownedWallIds = new Set(owner.walls);
+    return connected.filter((item) => ownedWallIds.has(item.wallId));
   }
 
   function magneticSnap(p: Point, excludeWallIds?: Set<string>): Point & { snappedToEndpoint?: boolean; snappedToWall?: boolean; snappedWallId?: string } {
@@ -841,35 +853,96 @@
 
   function updateDetectedRooms() {
     if (!currentFloor) return;
-    const hash = JSON.stringify(currentFloor.walls.map(w => [w.start, w.end]));
+    // Floor ID and wall IDs are part of the hash so switching to another
+    // pavimento with the same geometry still refreshes the current room list.
+    const hash = JSON.stringify([
+      currentFloor.id,
+      currentFloor.walls.map(w => [w.id, w.start, w.end]),
+    ]);
     if (hash === lastWallHash) return;
     lastWallHash = hash;
     const newRooms = detectRooms(currentFloor.walls);
     const savedRooms = currentFloor.rooms || [];
+    const usedSavedRoomIds = new Set<string>();
+    type Bounds = { left: number; right: number; top: number; bottom: number };
+
+    const getBounds = (room: Room): Bounds | null => {
+      const polygon = getRoomPolygon(room, currentFloor!.walls);
+      if (polygon.length < 3) return null;
+      return {
+        left: Math.min(...polygon.map((point) => point.x)),
+        right: Math.max(...polygon.map((point) => point.x)),
+        top: Math.min(...polygon.map((point) => point.y)),
+        bottom: Math.max(...polygon.map((point) => point.y)),
+      };
+    };
+    const sameBounds = (a: Bounds | null, b: Bounds | null): boolean =>
+      !!a && !!b &&
+      Math.abs(a.left - b.left) < 1 &&
+      Math.abs(a.right - b.right) < 1 &&
+      Math.abs(a.top - b.top) < 1 &&
+      Math.abs(a.bottom - b.bottom) < 1;
+
+    const savedBounds = new Map(
+      savedRooms.map((room) => [room.id, getBounds(room)]),
+    );
+    const reconciledRooms: Room[] = [];
+
     for (const nr of newRooms) {
       const nrWalls = new Set(nr.walls);
       const existing = detectedRooms.find(old => {
         const oldWalls = new Set(old.walls);
         return oldWalls.size === nrWalls.size && [...nrWalls].every(w => oldWalls.has(w));
       });
-      if (existing) {
-        nr.id = existing.id;
-        nr.name = existing.name;
-        nr.floorTexture = existing.floorTexture;
-      } else {
-        const saved = savedRooms.find(sr => {
-          const srWalls = new Set(sr.walls);
-          return srWalls.size === nrWalls.size && [...nrWalls].every(w => srWalls.has(w));
-        });
-        if (saved) {
-          nr.id = saved.id;
-          nr.name = saved.name;
-          if (saved.floorTexture) nr.floorTexture = saved.floorTexture;
-        }
+      let saved = savedRooms.find(sr => {
+        if (usedSavedRoomIds.has(sr.id)) return false;
+        const srWalls = new Set(sr.walls);
+        return srWalls.size === nrWalls.size && [...nrWalls].every(w => srWalls.has(w));
+      });
+      // Adjacent generated environments have coincident boundary walls. The
+      // detector may choose the neighbour's wall ID, so fall back to matching
+      // the exact geometric bounds rather than losing the persisted metadata.
+      const nrBounds = getBounds(nr);
+      if (!saved) {
+        saved = savedRooms.find((sr) =>
+          !usedSavedRoomIds.has(sr.id) &&
+          sameBounds(nrBounds, savedBounds.get(sr.id) ?? null),
+        );
       }
+      // Once this floor uses persisted environments, only those environments
+      // are valid rooms. A temporary gap between rooms must never become an
+      // automatic "Room N" made from walls that belong to its neighbours.
+      if (savedRooms.length > 0 && !saved) continue;
+
+      // Persisted user data always wins over the detector's temporary "Room N" names.
+      const metadata = saved ?? existing;
+      if (metadata) {
+        nr.id = metadata.id;
+        nr.name = metadata.name;
+        if (metadata.floorTexture) nr.floorTexture = metadata.floorTexture;
+        nr.color = metadata.color;
+        nr.roomType = metadata.roomType;
+        nr.labelOffset = metadata.labelOffset;
+      }
+      if (saved) usedSavedRoomIds.add(saved.id);
+
+      // Duplicate coincident edges can make the detector emit the same face
+      // more than once. Only render and expose one room for that geometry.
+      if (reconciledRooms.some((room) => sameBounds(getBounds(room), nrBounds))) continue;
+      reconciledRooms.push(nr);
     }
-    detectedRooms = newRooms;
-    detectedRoomsStore.set(newRooms);
+
+    // If duplicate shared edges prevented a face from being detected at all,
+    // retain the canonical saved room so its name and properties remain usable.
+    for (const saved of savedRooms) {
+      if (usedSavedRoomIds.has(saved.id)) continue;
+      const bounds = savedBounds.get(saved.id) ?? null;
+      if (!bounds) continue;
+      if (reconciledRooms.some((room) => sameBounds(getBounds(room), bounds))) continue;
+      reconciledRooms.push({ ...saved });
+    }
+    detectedRooms = reconciledRooms;
+    detectedRoomsStore.set(reconciledRooms);
   }
 
   function drawGuides() {
@@ -2005,7 +2078,46 @@
 
   function findRoomAt(p: Point): Room | null {
     if (!currentFloor) return null;
+    // Persisted environments own an explicit set of wall IDs. Prefer them so
+    // overlapping legacy rooms can still be selected and moved independently.
+    const savedRoom = _findRoomAt(p, [...currentFloor.rooms].reverse(), currentFloor.walls);
+    if (savedRoom) return savedRoom;
+    // Do not let the geometry detector turn gaps or composite faces into
+    // selectable rooms when the user is working with saved environments.
+    if (currentFloor.rooms.length > 0) return null;
     return _findRoomAt(p, detectedRooms, currentFloor.walls);
+  }
+
+  function startRoomDrag(room: Room, pointer: Point) {
+    if (!currentFloor) return;
+    selectedRoomId.set(room.id);
+    selectedElementId.set(null);
+    draggingRoomId = room.id;
+    roomDragStartMouse = { x: pointer.x, y: pointer.y };
+    roomDragStartPositions.clear();
+    const savedRoom = currentFloor.rooms.find((item) => item.id === room.id);
+    const ownedWallIds = savedRoom?.walls ?? room.walls;
+    // A directly clicked room uses the same complete visual selection as a
+    // marquee-selected room: all owned walls, bounding box and centre handle.
+    selectedElementIds.set(new Set(ownedWallIds));
+    for (const wallId of ownedWallIds) {
+      const wall = currentFloor.walls.find((item) => item.id === wallId);
+      if (wall) {
+        roomDragStartPositions.set(wallId, {
+          start: { ...wall.start },
+          end: { ...wall.end },
+        });
+      }
+    }
+  }
+
+  function rotateSelectedRoom() {
+    if (!currentSelectedRoomId || !currentFloor) return;
+    const room = currentFloor.rooms.find((item) => item.id === currentSelectedRoomId);
+    if (!room || !rotateRoom90(room.id)) return;
+    selectedElementId.set(null);
+    selectedElementIds.set(new Set(room.walls));
+    selectedRoomId.set(room.id);
   }
 
   // pointInPolygon, pointToSegmentDist, positionOnWall imported from hitTesting.ts
@@ -2256,13 +2368,13 @@
           const epThreshold = 15 / zoom;
           if (Math.hypot(wp.x - selWall.start.x, wp.y - selWall.start.y) < epThreshold) {
             draggingWallEndpoint = { wallId: selWall.id, endpoint: 'start' };
-            draggingConnectedEndpoints = findConnectedEndpoints(selWall.start, selWall.id);
+            draggingConnectedEndpoints = findOwnedConnectedEndpoints(selWall.start, selWall.id);
             commitFurnitureMove(); // uses same undo snapshot mechanism
             return;
           }
           if (Math.hypot(wp.x - selWall.end.x, wp.y - selWall.end.y) < epThreshold) {
             draggingWallEndpoint = { wallId: selWall.id, endpoint: 'end' };
-            draggingConnectedEndpoints = findConnectedEndpoints(selWall.end, selWall.id);
+            draggingConnectedEndpoints = findOwnedConnectedEndpoints(selWall.end, selWall.id);
             commitFurnitureMove();
             return;
           }
@@ -2280,8 +2392,8 @@
                 startMousePos: { ...wp },
                 origStart: { ...selWall.start },
                 origEnd: { ...selWall.end },
-                connectedStart: findConnectedEndpoints(selWall.start, selWall.id),
-                connectedEnd: findConnectedEndpoints(selWall.end, selWall.id),
+                connectedStart: findOwnedConnectedEndpoints(selWall.start, selWall.id),
+                connectedEnd: findOwnedConnectedEndpoints(selWall.end, selWall.id),
               };
             } else {
               // For curved walls, midpoint handle still curves
@@ -2404,11 +2516,9 @@
         }
         return;
       }
-      const wall = findWallAt(wp);
-      if (wall) {
-        selectElement(wall.id, e.shiftKey);
-      } else {
-        // Check if clicking on a room label (for dragging)
+      // Alt+drag keeps the advanced label-positioning behaviour available.
+      // A normal click on the central label selects and moves the room itself.
+      if (e.altKey) {
         const labelRoom = findRoomLabelAt(wp);
         if (labelRoom) {
           draggingRoomLabelId = labelRoom.id;
@@ -2419,30 +2529,31 @@
           selectedElementIds.set(new Set());
           return;
         }
-        const room = findRoomAt(wp);
-        if (room) {
-          selectedRoomId.set(room.id);
-          selectedElementId.set(null);
-          selectedElementIds.set(new Set());
-          // Start room drag
-          draggingRoomId = room.id;
-          roomDragStartMouse = { x: wp.x, y: wp.y };
-          roomDragStartPositions.clear();
-          for (const wid of room.walls) {
-            const w = currentFloor!.walls.find(wall => wall.id === wid);
-            if (w) roomDragStartPositions.set(wid, { start: { ...w.start }, end: { ...w.end } });
-          }
-        } else {
-          // Empty space — start marquee selection
-          marqueeStart = { ...wp };
-          marqueeEnd = { ...wp };
-          if (!e.shiftKey) {
-            selectedElementId.set(null);
-            selectedElementIds.set(new Set());
-          }
-          selectedRoomId.set(null);
-        }
       }
+
+      // After checking all placed objects, any free point inside a room selects
+      // it immediately. This includes the room name at its centre.
+      const room = findRoomAt(wp);
+      if (room) {
+        startRoomDrag(room, wp);
+        return;
+      }
+
+      // Walls remain individually selectable when clicking directly on a line.
+      const wall = findWallAt(wp);
+      if (wall) {
+        selectElement(wall.id, e.shiftKey);
+        return;
+      }
+
+      // Empty space — start marquee selection
+      marqueeStart = { ...wp };
+      marqueeEnd = { ...wp };
+      if (!e.shiftKey) {
+        selectedElementId.set(null);
+        selectedElementIds.set(new Set());
+      }
+      selectedRoomId.set(null);
     } else if (tool === 'door') {
       const wall = findWallAt(wp);
       if (wall) {
@@ -2492,22 +2603,6 @@
           selectedElementId.set(textHitId);
           return;
         }
-      }
-    }
-
-    // Double-click on a room to edit its name inline
-    if (currentTool === 'select') {
-      const wp = screenToWorld(sx, sy);
-      const room = findRoomAt(wp);
-      if (room) {
-        const poly = getRoomPolygon(room, currentFloor!.walls);
-        const centroid = roomCentroid(poly);
-        const sc = worldToScreen(centroid.x, centroid.y);
-        editingRoomId = room.id;
-        editingRoomName = room.name;
-        editingRoomPos = { x: sc.x, y: sc.y };
-        selectedRoomId.set(room.id);
-        return;
       }
     }
 
@@ -2619,11 +2714,13 @@
       const mSnapStep = currentSnapToGrid ? currentGridSize : SNAP;
       const dx = Math.round((mousePos.x - draggingMultiSelect.startMousePos.x) / mSnapStep) * mSnapStep;
       const dy = Math.round((mousePos.y - draggingMultiSelect.startMousePos.y) / mSnapStep) * mSnapStep;
+      const selectedWallPositions = new Map<string, { start: Point; end: Point }>();
       for (const [id, orig] of draggingMultiSelect.origPositions) {
         if (orig.start && orig.end) {
-          // Wall — move both endpoints
-          moveWallEndpoint(id, 'start', { x: orig.start.x + dx, y: orig.start.y + dy });
-          moveWallEndpoint(id, 'end', { x: orig.end.x + dx, y: orig.end.y + dy });
+          selectedWallPositions.set(id, {
+            start: orig.start,
+            end: orig.end,
+          });
         } else if (orig.position) {
           // Furniture, stair, or column
           const newPos = { x: orig.position.x + dx, y: orig.position.y + dy };
@@ -2633,15 +2730,17 @@
           if (currentFloor.columns) { const col = currentFloor.columns.find(c => c.id === id); if (col) { moveColumn(id, newPos); continue; } }
         }
       }
+      // Move every selected wall in one store update. In particular, this
+      // preserves both independent copies of coincident room-divider walls.
+      if (selectedWallPositions.size > 0) {
+        moveWallsTogether(selectedWallPositions, dx, dy);
+      }
     }
     if (draggingRoomId && currentFloor && roomDragStartPositions.size > 0) {
       const rSnapStep = currentSnapToGrid ? currentGridSize : SNAP;
       const dx = Math.round((mousePos.x - roomDragStartMouse.x) / rSnapStep) * rSnapStep;
       const dy = Math.round((mousePos.y - roomDragStartMouse.y) / rSnapStep) * rSnapStep;
-      for (const [wid, orig] of roomDragStartPositions) {
-        moveWallEndpoint(wid, 'start', { x: orig.start.x + dx, y: orig.start.y + dy });
-        moveWallEndpoint(wid, 'end', { x: orig.end.x + dx, y: orig.end.y + dy });
-      }
+      moveWallsTogether(roomDragStartPositions, dx, dy);
     }
     if (draggingCurveHandle && currentFloor) {
       const wall = currentFloor.walls.find(w => w.id === draggingCurveHandle);
@@ -2849,9 +2948,21 @@
           return p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
         }
 
-        // Walls: both endpoints inside
-        for (const w of currentFloor.walls) {
-          if (ptInRect(w.start) && ptInRect(w.end)) ids.add(w.id);
+        // Marquee selection treats a room as one indivisible item. A room is
+        // selected by its centre and all of its owned walls are added together.
+        // Individual walls are intentionally never selected by the marquee;
+        // that remains exclusive to clicking directly on a wall.
+        const selectedRooms: Room[] = [];
+        const selectableRooms = currentFloor.rooms.length > 0
+          ? currentFloor.rooms
+          : detectedRooms;
+        for (const room of selectableRooms) {
+          const polygon = getRoomPolygon(room, currentFloor.walls);
+          if (polygon.length < 3 || !ptInRect(roomCentroid(polygon))) continue;
+          const savedRoom = currentFloor.rooms.find((item) => item.id === room.id);
+          const ownedWallIds = savedRoom?.walls ?? room.walls;
+          for (const wallId of ownedWallIds) ids.add(wallId);
+          selectedRooms.push(room);
         }
         // Doors/windows: center point inside
         for (const d of currentFloor.doors) {
@@ -2889,14 +3000,26 @@
 
         if (ids.size > 0) {
           selectedElementIds.set(ids);
-          // Set primary selection to first element
-          const first = ids.values().next().value;
-          if (first) selectedElementId.set(first);
+          if (selectedRooms.length > 0) {
+            // Keep room properties visible without presenting one of its walls
+            // as the primary selection.
+            selectedRoomId.set(selectedRooms[0].id);
+            selectedElementId.set(null);
+          } else {
+            const first = ids.values().next().value;
+            if (first) selectedElementId.set(first);
+          }
         }
       }
       marqueeStart = null;
       marqueeEnd = null;
     }
+
+    // A room may be dragged directly or through its four-wall multi-selection.
+    // Resolve any overlap only when the pointer is released.
+    const droppedRoomId = draggingRoomId
+      ?? (draggingMultiSelect ? currentSelectedRoomId : null);
+    if (droppedRoomId) resolveRoomOverlap(droppedRoomId);
 
     if (draggingFurnitureId) commitFurnitureMove();
     if (draggingHandle) commitFurnitureMove();
@@ -3107,12 +3230,16 @@
 
   function onKeyDown(e: KeyboardEvent) {
     shiftDown = e.shiftKey;
+    const keyTarget = e.target as HTMLElement | null;
+    const keyTargetTag = keyTarget?.tagName;
+    const inFormField = keyTargetTag === 'INPUT' || keyTargetTag === 'TEXTAREA' || keyTargetTag === 'SELECT';
+    // Canvas shortcuts must never consume text typed in forms (notably Space for room names).
+    if (inFormField || keyTarget?.isContentEditable) return;
+
     if (e.code === 'Space') { spaceDown = true; e.preventDefault(); return; }
 
     // Exact-length entry while drawing a wall (issue #6):
     // type a number, then Enter places the wall at exactly that length.
-    const keyTargetTag = (e.target as HTMLElement)?.tagName;
-    const inFormField = keyTargetTag === 'INPUT' || keyTargetTag === 'TEXTAREA' || keyTargetTag === 'SELECT';
     if (currentTool === 'wall' && wallStart && !editingTextAnnotationId && !inFormField && !e.metaKey && !e.ctrlKey) {
       if (/^[0-9.]$/.test(e.key)) {
         typedWallLength += e.key;
@@ -3594,27 +3721,23 @@
         break;
 
       // Room actions
-      case 'rename-room':
-        if (ctxMenuRoom) {
-          // Trigger inline rename via existing mechanism
-          const poly = getRoomPolygon(ctxMenuRoom, currentFloor.walls);
-          const centroid = roomCentroid(poly);
-          const sp = worldToScreen(centroid.x, centroid.y);
-          editingRoomId = ctxMenuRoom.id;
-          editingRoomName = ctxMenuRoom.name;
-          editingRoomPos = { x: sp.x, y: sp.y };
-        }
-        break;
       case 'change-floor-texture':
         // Select the room so PropertiesPanel shows it
         if (ctxMenuRoom) selectedRoomId.set(ctxMenuRoom.id);
         break;
       case 'delete-room':
         if (ctxMenuRoom) {
-          beginUndoGroup();
-          for (const wid of ctxMenuRoom.walls) removeElement(wid);
-          endUndoGroup();
+          // Only a persisted room owns walls and may delete them. Detector-only
+          // faces can borrow walls from multiple neighbouring environments.
+          const savedRoom = currentFloor?.rooms.find((room) => room.id === ctxMenuRoom?.id);
+          if (savedRoom) {
+            beginUndoGroup();
+            for (const wid of savedRoom.walls) removeElement(wid);
+            endUndoGroup();
+          }
           selectedRoomId.set(null);
+          selectedElementIds.set(new Set());
+          selectedElementId.set(null);
         }
         break;
 
@@ -3716,6 +3839,28 @@
     ondragleave={onDragLeave}
     ondrop={onDrop}
   ></canvas>
+  {#if currentSelectedRoomId && currentFloor && currentTool === 'select'}
+    {@const selectedRoomBBox = getMultiSelectBBox()}
+    {#if selectedRoomBBox}
+      {@const rotateButtonPos = worldToScreen(
+        (selectedRoomBBox.minX + selectedRoomBBox.maxX) / 2,
+        selectedRoomBBox.minY,
+      )}
+      <button
+        class="absolute z-50 h-9 flex items-center gap-2 rounded-lg bg-slate-800 px-4 text-sm font-medium text-blue-300 shadow-lg hover:bg-slate-700 hover:text-blue-200 transition-colors"
+        style="left: {rotateButtonPos.x}px; top: {rotateButtonPos.y - 8}px; transform: translate(-50%, -100%);"
+        title="Girar ambiente 90°"
+        aria-label="Girar ambiente 90 graus"
+        onclick={rotateSelectedRoom}
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+          <path d="M21 3v6h-6"/>
+        </svg>
+        <span>Girar ambiente</span>
+      </button>
+    {/if}
+  {/if}
   <!-- Elevation pick mode hint chip -->
   {#if pickingElevation}
     <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-slate-800/90 text-white text-xs font-medium px-3.5 py-1.5 rounded-full shadow-lg pointer-events-none flex items-center gap-1.5">
@@ -3723,33 +3868,6 @@
       <span class="max-md:hidden">Click a wall to view its elevation — Esc to cancel</span>
       <span class="md:hidden">Tap a wall to view its elevation</span>
     </div>
-  {/if}
-  <!-- Inline room name editor -->
-  {#if editingRoomId}
-    <input
-      type="text"
-      class="absolute bg-white border-2 border-blue-500 rounded px-2 py-1 text-sm text-center shadow-lg outline-none"
-      style="left: {editingRoomPos.x}px; top: {editingRoomPos.y}px; transform: translate(-50%, -50%); z-index: 20; min-width: 100px;"
-      value={editingRoomName}
-      oninput={(e) => { editingRoomName = (e.target as HTMLInputElement).value; }}
-      onkeydown={(e) => {
-        if (e.key === 'Enter') {
-          updateRoom(editingRoomId!, { name: editingRoomName });
-          detectedRoomsStore.update(rooms => rooms.map(r => r.id === editingRoomId ? { ...r, name: editingRoomName } : r));
-          editingRoomId = null;
-        } else if (e.key === 'Escape') {
-          editingRoomId = null;
-        }
-      }}
-      onblur={() => {
-        if (editingRoomId) {
-          updateRoom(editingRoomId, { name: editingRoomName });
-          detectedRoomsStore.update(rooms => rooms.map(r => r.id === editingRoomId ? { ...r, name: editingRoomName } : r));
-          editingRoomId = null;
-        }
-      }}
-      autofocus
-    />
   {/if}
   <!-- Inline text annotation editor -->
   {#if editingTextAnnotationId}
@@ -3804,7 +3922,7 @@
       <div class="text-center opacity-60">
         <div class="text-5xl mb-3">🏠</div>
         <div class="text-sm font-medium text-gray-500">Start building your floor plan</div>
-        <div class="text-xs text-gray-400 mt-1">Draw walls with <span class="font-mono bg-gray-100 px-1 rounded">W</span> or drag items from the sidebar</div>
+        <div class="text-xs text-gray-400 mt-1">Use as ferramentas da lateral para começar a planta</div>
       </div>
     </div>
   {/if}
@@ -3838,7 +3956,7 @@
       {/if}
       <span class="text-gray-300">|</span>
     {/if}
-    {#if currentSelectedIds.size > 1}
+    {#if !currentSelectedRoomId && currentSelectedIds.size > 1}
       <span class="text-blue-600 font-medium">{currentSelectedIds.size} selected</span>
       <span class="text-gray-300">|</span>
     {/if}

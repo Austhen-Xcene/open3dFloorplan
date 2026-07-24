@@ -1,35 +1,30 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
-  import { currentProject, viewMode, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, loadProject, createDefaultProject, snapEnabled, canvasZoom, panMode, showFurnitureStore, layerVisibility, importFloorIntoCurrentProject, activeFloor, selectedElementId, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { currentProject, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, loadProject, createDefaultProject, canvasZoom, panMode, selectedTool, activeFloor, selectedElementId, elevationWallId, elevationPickMode } from '$lib/stores/project';
   import { localStore } from '$lib/services/datastore';
   import { get } from 'svelte/store';
   import type { Floor, Project } from '$lib/models/types';
   import { exportAsPNG, exportAsJSON, exportAsSVG, exportPDF } from '$lib/utils/export';
   import { exportDXF, exportDWG } from '$lib/utils/cadExport';
-  import { importRoomPlan } from '$lib/utils/roomplanImport';
-  import SettingsDialog from './SettingsDialog.svelte';
   import AreaSummaryPanel from '$lib/components/sidebar/AreaSummaryPanel.svelte';
   import { saveState, lastSavedAt, manualSave, initAutoSave } from '$lib/stores/saveStatus';
-  import { initVersionHistory, snapshotOnAction } from '$lib/stores/versionHistory';
-  import VersionHistoryPanel from './VersionHistoryPanel.svelte';
+  import { initVersionHistory } from '$lib/stores/versionHistory';
 
-  let settingsOpen = $state(false);
   let areaOpen = $state(false);
-  let versionHistoryOpen = $state(false);
 
   let projectName = $state('');
-  let mode = $state<'2d' | '3d'>('2d');
   let floors: Floor[] = $state([]);
   let activeFloorId = $state('');
   let editingName = $state(false);
   let exportOpen = $state(false);
   import { triggerTip } from '$lib/stores/onboarding.svelte';
-  let snapOn = $state(true);
   let exportRef: HTMLDivElement;
   // Mobile (< md) overflow menu for secondary actions
   let moreOpen = $state(false);
   let moreRef: HTMLDivElement | undefined = $state();
+  // Elevation code is retained for future use, but the current product is Plan-only.
+  const ENABLE_ELEVATION_VIEW = false;
 
   currentProject.subscribe((p) => {
     if (p) {
@@ -38,18 +33,11 @@
       activeFloorId = p.activeFloorId;
     }
   });
-  viewMode.subscribe((m) => { mode = m; });
-
-  function setMode(m: '2d' | '3d') {
-    viewMode.set(m);
-  }
-
   /** Switch the 2D canvas area to the integrated elevation view.
    *  With a wall selected it opens that wall; otherwise it stays in Plan and
    *  arms pick mode — the next wall clicked in the canvas opens its elevation.
-   *  In 3D this switches back to 2D first. */
+   */
   function enterElevation() {
-    if (mode === '3d') viewMode.set('2d');
     const floor = get(activeFloor);
     const selId = get(selectedElementId);
     const wall = selId ? floor?.walls.find((w) => w.id === selId) : undefined;
@@ -120,29 +108,6 @@
     exportOpen = false;
   }
 
-  function onExport3DPNG() {
-    const p = get(currentProject);
-    const name = p?.name || 'floorplan';
-    // Switch to 3D, wait a tick, then screenshot
-    const oldMode = mode;
-    viewMode.set('3d');
-    setTimeout(() => {
-      const c = document.querySelector('.w-full.h-full canvas, div canvas') as HTMLCanvasElement;
-      if (c) {
-        c.toBlob((blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = `${name}-3d.png`; a.click();
-            URL.revokeObjectURL(url);
-          }
-        });
-      }
-      if (oldMode === '2d') viewMode.set('2d');
-    }, 500);
-    exportOpen = false;
-  }
-
   function onExportJSON() {
     const p = get(currentProject);
     if (p) exportAsJSON(p);
@@ -210,7 +175,6 @@
     function handleKeydown(e: KeyboardEvent) {
       if (exportOpen) exportOpen = false;
       if (e.key === 'Escape' && moreOpen) moreOpen = false;
-      if (e.key === 'Escape' && versionHistoryOpen) versionHistoryOpen = false;
       if (e.key === 'Escape' && areaOpen) areaOpen = false;
     }
     document.addEventListener('click', handleClickOutside, true);
@@ -222,30 +186,25 @@
     };
   });
 
-  function onImportJSON() {
+  function onImportProject() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json,.zip';
+    input.accept = '.json,application/json';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
       try {
         const text = await file.text();
         const data = JSON.parse(text);
-        // Detect RoomPlan format (has walls array with dimensions, or rooms/doors/windows at top level)
-        if (data.walls && Array.isArray(data.walls) && data.walls[0]?.dimensions) {
-          // RoomPlan JSON — import into current project
-          const floor = importRoomPlan(data, { straighten: true, orthogonal: true });
-          importFloorIntoCurrentProject(floor);
-        } else if (data.floors && data.id) {
+        if (data.floors && data.id) {
           // Validate project structure
           if (!Array.isArray(data.floors) || data.floors.length === 0) {
-            alert('Invalid project file: "floors" must be a non-empty array.');
+            alert('Arquivo de projeto inválido: deve existir pelo menos um pavimento.');
             return;
           }
           for (const fl of data.floors) {
             if (!fl.id || !Array.isArray(fl.walls)) {
-              alert('Invalid project file: each floor must have an "id" and "walls" array.');
+              alert('Arquivo de projeto inválido: os dados dos pavimentos estão incompletos.');
               return;
             }
           }
@@ -257,14 +216,15 @@
           if (data.updatedAt) data.updatedAt = new Date(data.updatedAt);
           loadProject(data as Project);
         } else {
-          alert('Unrecognized file format. Expected a project file or Apple RoomPlan JSON.');
+          alert('Formato não reconhecido. Selecione um projeto JSON exportado por este editor.');
         }
       } catch (e: any) {
-        alert('Failed to import: ' + e.message);
+        alert('Não foi possível importar o projeto: ' + e.message);
       }
     };
     input.click();
     exportOpen = false;
+    moreOpen = false;
   }
 </script>
 
@@ -302,12 +262,21 @@
   <!-- Floor selector as buttons (in overflow menu on mobile) -->
   <div class="flex items-center gap-1 max-md:hidden">
     {#each floors as fl}
-      <button
-        class="px-2 py-0.5 text-xs rounded transition-colors {fl.id === activeFloorId ? 'bg-white text-slate-800 font-semibold' : 'text-white/80 hover:bg-white/10'}"
-        onclick={() => setActiveFloor(fl.id)}
-        ondblclick={() => onRemoveFloor(fl.id)}
-        title={fl.id === activeFloorId ? 'Active floor (dbl-click to remove)' : 'Click to switch, dbl-click to remove'}
-      >{fl.name}</button>
+      <div class="flex items-center rounded transition-colors {fl.id === activeFloorId ? 'bg-white text-slate-800' : 'text-white/80 hover:bg-white/10'}">
+        <button
+          class="pl-2 pr-1 py-0.5 text-xs {fl.id === activeFloorId ? 'font-semibold' : ''}"
+          onclick={() => setActiveFloor(fl.id)}
+          title={fl.id === activeFloorId ? 'Active floor' : 'Switch to this floor'}
+        >{fl.name}</button>
+        {#if floors.length > 1}
+          <button
+            class="pl-1 pr-1.5 py-0.5 text-xs font-bold opacity-60 hover:opacity-100 hover:text-red-500"
+            onclick={() => onRemoveFloor(fl.id)}
+            title="Excluir {fl.name}"
+            aria-label="Excluir {fl.name}"
+          >×</button>
+        {/if}
+      </div>
     {/each}
     <button
       onclick={onAddFloor}
@@ -315,7 +284,9 @@
       title="Add Floor"
       aria-label="Add Floor"
     >+</button>
-    <span class="text-white/40 text-[10px] ml-1">{floors.length}F</span>
+    <span class="text-white/50 text-[10px] ml-1">
+      {floors.length} {floors.length === 1 ? 'Pavimento' : 'Pavimentos'}
+    </span>
   </div>
 
   <div class="flex-1"></div>
@@ -329,23 +300,10 @@
 
   <div class="h-5 w-px bg-white/20 max-md:hidden"></div>
 
-  <!-- Snap to grid toggle -->
-  <button
-    onclick={() => { snapEnabled.update(v => !v); snapOn = !snapOn; }}
-    class="p-1.5 rounded transition-colors max-md:hidden {snapOn ? 'text-white bg-white/20' : 'text-white/40 hover:text-white/70 hover:bg-white/10'}"
-    title="Snap to Grid ({snapOn ? 'On' : 'Off'})"
-    aria-label="Snap to Grid"
-  >
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-    </svg>
-  </button>
-
   <!-- Select / Pan toggle (mobile pans with two fingers; toggle lives in overflow menu) -->
-  {#if mode === '2d'}
   <div class="flex bg-white/15 rounded-full p-0.5 max-md:hidden">
     <button
-      onclick={() => panMode.set(false)}
+      onclick={() => { selectedTool.set('select'); panMode.set(false); }}
       class="px-2 py-1 text-xs font-semibold rounded-full transition-colors {!$panMode ? 'bg-white text-slate-800' : 'text-white/80 hover:text-white'}"
       title="Select mode (V)"
       aria-label="Select mode"
@@ -353,7 +311,7 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>
     </button>
     <button
-      onclick={() => panMode.set(true)}
+      onclick={() => { selectedTool.set('select'); panMode.set(true); }}
       class="px-2 py-1 text-xs font-semibold rounded-full transition-colors {$panMode ? 'bg-white text-slate-800' : 'text-white/80 hover:text-white'}"
       title="Pan mode (H)"
       aria-label="Pan mode"
@@ -361,25 +319,11 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v1"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
     </button>
   </div>
-  {/if}
-
-  <!-- Furniture visibility toggle -->
-  <button
-    onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))}
-    class="p-1.5 rounded transition-colors max-md:hidden {$showFurnitureStore ? 'text-white bg-white/20' : 'text-white/40 hover:text-white/70 hover:bg-white/10'}"
-    title="Toggle Furniture ({$showFurnitureStore ? 'Visible' : 'Hidden'})"
-    aria-label="Toggle Furniture"
-  >
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="2" y="12" width="20" height="8" rx="1"/><path d="M4 12V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5"/><line x1="12" y1="12" x2="12" y2="20"/>
-    </svg>
-  </button>
 
   <div class="h-5 w-px bg-white/20 max-md:hidden"></div>
 
-  <!-- Plan / Elevation sub-toggle (2D only) — sits left of the 2D/3D pill so the
-       two switches read as a family; mobile (<md) uses the overflow menu instead -->
-  {#if mode === '2d'}
+  {#if ENABLE_ELEVATION_VIEW}
+    <!-- Disabled for the Plan-only workflow; retained for future reactivation. -->
     <div class="flex bg-white/15 rounded-full p-0.5 max-md:hidden">
       <button
         onclick={exitElevation}
@@ -402,21 +346,8 @@
     </div>
   {/if}
 
-  <!-- 2D/3D pill toggle -->
-  <div class="flex bg-white/15 rounded-full p-0.5">
-    <button
-      onclick={() => setMode('2d')}
-      class="px-3 max-md:px-2 py-1 text-xs font-semibold rounded-full transition-colors {mode === '2d' ? 'bg-white text-slate-800' : 'text-white/80 hover:text-white'}"
-    >2D</button>
-    <button
-      onclick={() => setMode('3d')}
-      class="px-3 max-md:px-2 py-1 text-xs font-semibold rounded-full transition-colors {mode === '3d' ? 'bg-white text-slate-800' : 'text-white/80 hover:text-white'}"
-    >3D</button>
-  </div>
-
-  <!-- Zoom controls (2D plan only; mobile uses pinch + overflow menu) -->
-  {#if mode === '2d' && !$elevationWallId}
-    <div class="flex items-center gap-1 bg-white/15 rounded-full p-0.5 max-md:hidden">
+  <!-- Zoom controls (Plan only; mobile uses pinch + overflow menu) -->
+  <div class="flex items-center gap-1 bg-white/15 rounded-full p-0.5 max-md:hidden">
       <button
         onclick={() => canvasZoom.update(z => Math.max(0.1, z / 1.25))}
         class="w-7 h-7 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors text-sm font-bold"
@@ -434,37 +365,16 @@
         title="Zoom In (+)"
         aria-label="Zoom In"
       >+</button>
-    </div>
-  {/if}
-
-  <!-- Version History button -->
-  <button
-    onclick={() => versionHistoryOpen = true}
-    class="p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors max-md:hidden"
-    title="Version History"
-    aria-label="Version History"
-  >
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-  </button>
+  </div>
 
   <!-- Area summary button -->
   <button
     onclick={() => areaOpen = true}
     class="px-2 py-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors max-md:hidden"
-    title="Area Summary"
-    aria-label="Area Summary"
+    title="Resumo de áreas"
+    aria-label="Resumo de áreas"
   >
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v18"/></svg>
-  </button>
-
-  <!-- Settings button -->
-  <button
-    onclick={() => settingsOpen = true}
-    class="px-2 py-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded transition-colors max-md:hidden"
-    title="Settings"
-    aria-label="Settings"
-  >
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
 
   <!-- Overflow menu (mobile only): secondary actions hidden from the condensed bar -->
@@ -479,35 +389,54 @@
     </button>
     {#if moreOpen}
       <div class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 w-56 z-50 max-h-[70vh] overflow-y-auto">
-        {#if floors.length > 1 || mode === '2d'}
-          <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Floors</div>
-          {#each floors as fl}
-            <button class="w-full px-3 py-2 text-sm hover:bg-gray-100 text-left flex items-center gap-2 {fl.id === activeFloorId ? 'text-blue-600 font-semibold' : 'text-gray-700'}" onclick={() => { setActiveFloor(fl.id); moreOpen = false; }}>
+        <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">Floors</div>
+        {#each floors as fl}
+          <div class="flex items-center hover:bg-gray-100 {fl.id === activeFloorId ? 'text-blue-600 font-semibold' : 'text-gray-700'}">
+            <button class="flex-1 px-3 py-2 text-sm text-left" onclick={() => { setActiveFloor(fl.id); moreOpen = false; }}>
               {fl.name}{fl.id === activeFloorId ? ' ✓' : ''}
             </button>
-          {/each}
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor(); }}>+ Add Floor</button>
-          <div class="h-px bg-gray-100 my-1"></div>
+            {#if floors.length > 1}
+              <button
+                class="px-3 py-2 text-base text-gray-400 hover:text-red-600"
+                onclick={() => onRemoveFloor(fl.id)}
+                title="Excluir {fl.name}"
+                aria-label="Excluir {fl.name}"
+              >×</button>
+            {/if}
+          </div>
+        {/each}
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { onAddFloor(); }}>+ Add Floor</button>
+        <div class="h-px bg-gray-100 my-1"></div>
+        <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">View</div>
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.update(z => Math.min(10, z * 1.25))}>Zoom In</button>
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.update(z => Math.max(0.1, z / 1.25))}>Zoom Out</button>
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.set(1)}>Reset Zoom ({Math.round($canvasZoom * 100)}%)</button>
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => panMode.update(v => !v)}>{$panMode ? '✓ ' : ''}Pan Mode</button>
+        <div class="h-px bg-gray-100 my-1"></div>
+        {#if ENABLE_ELEVATION_VIEW}
+          <!-- Disabled for the Plan-only workflow; retained for future reactivation. -->
+          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={toggleElevationView}>{$elevationWallId ? '✓ ' : ''}Elevation View</button>
         {/if}
-        {#if mode === '2d'}
-          <div class="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">View</div>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.update(z => Math.min(10, z * 1.25))}>Zoom In</button>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.update(z => Math.max(0.1, z / 1.25))}>Zoom Out</button>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.set(1)}>Reset Zoom ({Math.round($canvasZoom * 100)}%)</button>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => panMode.update(v => !v)}>{$panMode ? '✓ ' : ''}Pan Mode</button>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { snapEnabled.update(v => !v); snapOn = !snapOn; }}>{snapOn ? '✓ ' : ''}Snap to Grid</button>
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))}>{$showFurnitureStore ? '✓ ' : ''}Show Furniture</button>
-          <div class="h-px bg-gray-100 my-1"></div>
-        {/if}
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={toggleElevationView}>{$elevationWallId ? '✓ ' : ''}Elevation View</button>
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { versionHistoryOpen = true; moreOpen = false; }}>Version History</button>
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { areaOpen = true; moreOpen = false; }}>Area Summary</button>
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { settingsOpen = true; moreOpen = false; }}>Settings</button>
+        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { areaOpen = true; moreOpen = false; }}>Resumo de áreas</button>
       </div>
     {/if}
   </div>
 
   <div class="h-5 w-px bg-white/20 max-md:hidden"></div>
+
+  <button
+    onclick={onImportProject}
+    class="px-3 py-1.5 max-md:px-2 text-sm text-white/90 hover:text-white hover:bg-white/10 rounded transition-colors flex items-center gap-1.5"
+    title="Importar projeto"
+    aria-label="Importar projeto"
+  >
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <span class="max-md:hidden">Importar</span>
+  </button>
 
   <!-- Export dropdown -->
   <div class="relative" bind:this={exportRef}>
@@ -531,10 +460,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
           Export 2D as PNG
         </button>
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={onExport3DPNG}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-          Export 3D as PNG
-        </button>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={onExportSVG}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
           Export as SVG
@@ -556,10 +481,6 @@
           Download JSON
         </button>
         <div class="h-px bg-gray-100 my-1"></div>
-        <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={onImportJSON}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          Import JSON
-        </button>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left flex items-center gap-2" onclick={newProject}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           New Project
@@ -585,16 +506,13 @@
   </button>
 </div>
 
-<SettingsDialog bind:open={settingsOpen} />
-<VersionHistoryPanel bind:open={versionHistoryOpen} />
-
 {#if areaOpen}
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onclick={() => areaOpen = false} onkeydown={(e) => { if (e.key === 'Escape') areaOpen = false; }}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="bg-white rounded-xl shadow-2xl w-[420px] max-w-[calc(100vw-2rem)] max-h-[80vh] overflow-hidden" onclick={(e) => e.stopPropagation()}>
     <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
-      <h2 class="text-base font-semibold text-gray-800">📐 Area Summary</h2>
+      <h2 class="text-base font-semibold text-gray-800">📐 Resumo de áreas</h2>
       <button onclick={() => areaOpen = false} class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
     </div>
     <div class="overflow-y-auto max-h-[calc(80vh-52px)] p-1">

@@ -12,8 +12,8 @@
 
   const tourSteps = [
     { title: 'Left Sidebar', desc: 'Browse furniture and room presets', icon: '📦' },
-    { title: 'Canvas', desc: "Draw walls with 'W' key, drag to place items", icon: '✏️' },
-    { title: 'Top Bar', desc: 'Switch between 2D and 3D views', icon: '🔄' },
+    { title: 'Canvas', desc: 'Use as ferramentas da lateral para editar a planta', icon: '✏️' },
+    { title: 'Barra superior', desc: 'Navegue pela planta 2D e pelas elevações', icon: '📐' },
     { title: 'Status Bar', desc: 'Toggle grid, snap, and other options', icon: '⚙️' },
   ];
 
@@ -136,7 +136,7 @@
     <div class="bg-white rounded-2xl shadow-2xl p-10 max-w-md w-full mx-4 text-center">
       <div class="text-5xl mb-4">🏠</div>
       <h1 class="text-3xl font-bold text-gray-800 mb-2">Welcome</h1>
-      <p class="text-gray-500 mb-8">Design your dream space in 2D and 3D</p>
+      <p class="text-gray-500 mb-8">Crie sua planta 2D com ambientes e medidas exatas</p>
 
       <div class="space-y-3">
         <button

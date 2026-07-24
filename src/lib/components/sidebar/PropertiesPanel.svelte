@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { activeFloor, selectedElementId, selectedRoomId, updateWall, updateDoor, updateWindow, updateRoom, updateFurniture, detectedRoomsStore, updateStair, updateColumn, updateBackgroundImage, setBackgroundImage, calibrationMode, calibrationPoints, updateTextAnnotation, toggleFurnitureLock, updateEntourageItem, removeElement, elevationWallId } from '$lib/stores/project';
+  import { activeFloor, selectedElementId, selectedRoomId, updateWall, updateDoor, updateWindow, updateRoom, updateRectangularRoom, updateFurniture, detectedRoomsStore, updateStair, updateColumn, updateBackgroundImage, setBackgroundImage, calibrationMode, calibrationPoints, updateTextAnnotation, toggleFurnitureLock, updateEntourageItem, removeElement, elevationWallId } from '$lib/stores/project';
   import { getEntourageDef } from '$lib/utils/entourageCatalog';
   import { floorMaterials, wallColors } from '$lib/utils/materials';
   import { getCatalogItem } from '$lib/utils/furnitureCatalog';
@@ -42,6 +42,8 @@
   let selectedEntourage = $derived(floor?.entourage?.find(en => en.id === selId) ?? null);
   let hasBgImage = $derived(!!floor?.backgroundImage);
   let selectedRoom = $derived(floor?.rooms?.find(r => r.id === selRoomId) ?? detectedRooms.find(r => r.id === selRoomId) ?? null);
+  let roomSizeError = $state('');
+  let roomDimensions = $derived(selectedRoomDimensions());
 
   // Helper to get the parent wall for selected door/window
   let selectedDoorWall = $derived((selectedDoor && floor?.walls?.find(w => w.id === selectedDoor.wallId)) ?? null);
@@ -253,6 +255,46 @@
     updateRoom(selectedRoom.id, { name });
     updateDetectedRoom(selectedRoom.id, { name });
   }
+  function selectedRoomDimensions(): { width: number; length: number } | null {
+    if (!selectedRoom || !floor || selectedRoom.walls.length !== 4) return null;
+    const walls = selectedRoom.walls
+      .map((wallId) => floor?.walls.find((wall) => wall.id === wallId))
+      .filter((wall): wall is Wall => !!wall);
+    if (walls.length !== 4) return null;
+    const points = walls.flatMap((wall) => [wall.start, wall.end]);
+    return {
+      width: Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x)),
+      length: Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y)),
+    };
+  }
+  function roomDimensionValue(cm: number): number {
+    return settings.units === 'imperial'
+      ? Math.round(cm / 2.54 * 10) / 10
+      : Math.round(cm) / 100;
+  }
+  function roomDimensionUnit(): string {
+    return settings.units === 'imperial' ? 'in' : 'm';
+  }
+  function roomInputToCm(value: number): number {
+    return settings.units === 'imperial' ? value * 2.54 : value * 100;
+  }
+  function onRoomDimension(e: Event, dimension: 'width' | 'length') {
+    if (!selectedRoom) return;
+    const dimensions = selectedRoomDimensions();
+    const value = Number((e.target as HTMLInputElement).value);
+    const valueCm = roomInputToCm(value);
+    if (!dimensions || !Number.isFinite(valueCm) || valueCm < 50 || valueCm > 5000) {
+      roomSizeError = 'Use medidas entre 0,50 m e 50 m.';
+      return;
+    }
+    const width = dimension === 'width' ? valueCm : dimensions.width;
+    const length = dimension === 'length' ? valueCm : dimensions.length;
+    if (!updateRectangularRoom(selectedRoom.id, selectedRoom.name, width, length)) {
+      roomSizeError = 'Este ambiente não pode ser redimensionado.';
+      return;
+    }
+    roomSizeError = '';
+  }
   function onRoomFloor(texture: string) {
     if (!selectedRoom) return;
     updateRoom(selectedRoom.id, { floorTexture: texture });
@@ -317,6 +359,13 @@
     { label: '🧶 Carpet', ids: ['carpet-beige', 'carpet-gray'] },
   ];
 
+  // Kept for future use. The simplified 2D workflow currently exposes only
+  // room name and area in Room Properties.
+  const ENABLE_ADVANCED_ROOM_PROPERTIES = false;
+  // Length, height, elevation and interior/exterior materials are retained
+  // for future use, but hidden from the simplified Wall Properties panel.
+  const ENABLE_ADVANCED_WALL_PROPERTIES = false;
+
   let hasSelection = $derived(!!selectedWall || !!selectedDoor || !!selectedWindow || !!selectedFurniture || !!selectedRoom || !!selectedStair || !!selectedColumn || !!selectedTextAnnotation || !!selectedEntourage || (!is3D && hasBgImage));
 </script>
 
@@ -328,26 +377,32 @@
       Wall Properties
     </h3>
     <div class="space-y-3">
-      <label class="block">
-        <span class="text-xs text-gray-500">Length ({unitLabel()})</span>
-        <input type="number" value={displayValue(wallLength)} onchange={onWallLength} min="1" class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
-      </label>
+      {#if ENABLE_ADVANCED_WALL_PROPERTIES}
+        <!-- Disabled for the simplified workflow; retained for future reactivation. -->
+        <label class="block">
+          <span class="text-xs text-gray-500">Length ({unitLabel()})</span>
+          <input type="number" value={displayValue(wallLength)} onchange={onWallLength} min="1" class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
+        </label>
+      {/if}
       <label class="block">
         <span class="text-xs text-gray-500">Thickness ({unitLabel()})</span>
         <input type="number" value={displayValue(selectedWall.thickness)} oninput={onWallThickness} class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
       </label>
-      <label class="block">
-        <span class="text-xs text-gray-500">Height ({unitLabel()})</span>
-        <input type="number" value={displayValue(selectedWall.height)} oninput={onWallHeight} class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
-      </label>
-      <button
-        class="w-full py-1.5 text-sm rounded-md bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors flex items-center justify-center gap-1.5"
-        onclick={() => { if (selectedWall) elevationWallId.set(selectedWall.id); }}
-        title="View this wall face-on and edit its doors and windows"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="1"/><line x1="3" y1="18" x2="21" y2="18"/><rect x="7" y="9" width="4" height="4"/><rect x="14" y="10" width="3" height="8"/></svg>
-        Elevation
-      </button>
+      {#if ENABLE_ADVANCED_WALL_PROPERTIES}
+        <!-- Height and Elevation disabled; implementation retained for future use. -->
+        <label class="block">
+          <span class="text-xs text-gray-500">Height ({unitLabel()})</span>
+          <input type="number" value={displayValue(selectedWall.height)} oninput={onWallHeight} class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
+        </label>
+        <button
+          class="w-full py-1.5 text-sm rounded-md bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors flex items-center justify-center gap-1.5"
+          onclick={() => { if (selectedWall) elevationWallId.set(selectedWall.id); }}
+          title="View this wall face-on and edit its doors and windows"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="1"/><line x1="3" y1="18" x2="21" y2="18"/><rect x="7" y="9" width="4" height="4"/><rect x="14" y="10" width="3" height="8"/></svg>
+          Elevation
+        </button>
+      {/if}
       <div class="flex items-center gap-2">
         <span class="text-xs text-gray-500">Curved</span>
         <button
@@ -371,8 +426,10 @@
           {selectedWall.curvePoint ? '◆ On' : '◇ Off'}
         </button>
       </div>
-      <!-- Wall Material Tabs: Interior / Exterior -->
-      <div>
+      {#if ENABLE_ADVANCED_WALL_PROPERTIES}
+        <!-- Interior, Exterior and Texture controls disabled; implementation
+             retained for future reactivation. -->
+        <div>
         <div class="flex border-b border-gray-200 mb-3">
           <button
             class="flex-1 py-1.5 text-xs font-medium border-b-2 transition-colors {wallSideTab === 'interior' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-400 hover:text-gray-600'}"
@@ -454,7 +511,8 @@
             </div>
           </div>
         {/if}
-      </div>
+        </div>
+      {/if}
     </div>
 
   {:else if selectedDoor}
@@ -692,84 +750,124 @@
       Room Properties
     </h3>
     <div class="space-y-3">
-      <label class="block">
-        <span class="text-xs text-gray-500">Room Type</span>
-        <select value={selectedRoomType()} onchange={onRoomType} class="w-full px-2 py-1 border border-gray-200 rounded text-sm">
-          {#each roomTypes as rt}
-            <option value={rt.id}>{rt.icon} {rt.label}</option>
-          {/each}
-        </select>
-      </label>
+      {#if ENABLE_ADVANCED_ROOM_PROPERTIES}
+        <!-- Disabled for the simplified workflow; retained for future reactivation. -->
+        <label class="block">
+          <span class="text-xs text-gray-500">Room Type</span>
+          <select value={selectedRoomType()} onchange={onRoomType} class="w-full px-2 py-1 border border-gray-200 rounded text-sm">
+            {#each roomTypes as rt}
+              <option value={rt.id}>{rt.icon} {rt.label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       <label class="block">
         <span class="text-xs text-gray-500">Room Name</span>
         <input type="text" value={selectedRoom.name} oninput={onRoomName} class="w-full px-2 py-1 border border-gray-200 rounded text-sm" />
       </label>
-      <label class="block">
-        <span class="text-xs text-gray-500">Category</span>
-        <select value={selectedRoom.roomType ?? 'indoor'} onchange={(e) => { if (selectedRoom) { const v = (e.target as HTMLSelectElement).value as RoomCategory; updateRoom(selectedRoom.id, { roomType: v }); updateDetectedRoom(selectedRoom.id, { roomType: v } as any); } }} class="w-full px-2 py-1 border border-gray-200 rounded text-sm">
-          <option value="indoor">🏠 Indoor</option>
-          <option value="outdoor">🌳 Outdoor</option>
-          <option value="garage">🚗 Garage</option>
-          <option value="utility">🔧 Utility</option>
-        </select>
-      </label>
+      {#if roomDimensions}
+        <div class="grid grid-cols-2 gap-2">
+          <label class="block">
+            <span class="text-xs text-gray-500">Largura ({roomDimensionUnit()})</span>
+            <input
+              type="number"
+              value={roomDimensionValue(roomDimensions.width)}
+              min={settings.units === 'imperial' ? 19.7 : 0.5}
+              max={settings.units === 'imperial' ? 1968.5 : 50}
+              step={settings.units === 'imperial' ? 1 : 0.1}
+              onchange={(event) => onRoomDimension(event, 'width')}
+              class="w-full px-2 py-1 border border-gray-200 rounded text-sm"
+            />
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-500">Comprimento ({roomDimensionUnit()})</span>
+            <input
+              type="number"
+              value={roomDimensionValue(roomDimensions.length)}
+              min={settings.units === 'imperial' ? 19.7 : 0.5}
+              max={settings.units === 'imperial' ? 1968.5 : 50}
+              step={settings.units === 'imperial' ? 1 : 0.1}
+              onchange={(event) => onRoomDimension(event, 'length')}
+              class="w-full px-2 py-1 border border-gray-200 rounded text-sm"
+            />
+          </label>
+        </div>
+        {#if roomSizeError}
+          <p class="text-xs text-red-600" role="alert">{roomSizeError}</p>
+        {/if}
+      {/if}
+      {#if ENABLE_ADVANCED_ROOM_PROPERTIES}
+        <!-- Disabled for the simplified workflow; retained for future reactivation. -->
+        <label class="block">
+          <span class="text-xs text-gray-500">Category</span>
+          <select value={selectedRoom.roomType ?? 'indoor'} onchange={(e) => { if (selectedRoom) { const v = (e.target as HTMLSelectElement).value as RoomCategory; updateRoom(selectedRoom.id, { roomType: v }); updateDetectedRoom(selectedRoom.id, { roomType: v } as any); } }} class="w-full px-2 py-1 border border-gray-200 rounded text-sm">
+            <option value="indoor">🏠 Indoor</option>
+            <option value="outdoor">🌳 Outdoor</option>
+            <option value="garage">🚗 Garage</option>
+            <option value="utility">🔧 Utility</option>
+          </select>
+        </label>
+      {/if}
       <div>
         <span class="text-xs text-gray-500">Area</span>
         <p class="text-sm text-gray-700">{formatArea(selectedRoom.area, settings.units)}</p>
       </div>
-      <!-- Room Color -->
-      <div>
-        <span class="text-xs text-gray-500 mb-1.5 block">Room Color{selectedRoom.floorTexture === 'none' ? ' (used as floor color)' : ''}</span>
-        <div class="grid grid-cols-5 gap-1.5 mb-2">
-          {#each roomColorPresets as preset}
-            <button
-              class="w-7 h-7 rounded-md border-2 hover:border-gray-300 transition-colors {selectedRoom.color === preset.color ? 'border-blue-500 ring-1 ring-blue-200' : 'border-gray-200'}"
-              style="background-color: {preset.color}"
-              title={preset.name}
-              onclick={() => onRoomColor(preset.color)}
-            ></button>
-          {/each}
+      {#if ENABLE_ADVANCED_ROOM_PROPERTIES}
+        <!-- Room color and floor materials (Wood, Tile, Stone, Carpet) are
+             disabled for now; implementation is retained for future use. -->
+        <div>
+          <span class="text-xs text-gray-500 mb-1.5 block">Room Color{selectedRoom.floorTexture === 'none' ? ' (used as floor color)' : ''}</span>
+          <div class="grid grid-cols-5 gap-1.5 mb-2">
+            {#each roomColorPresets as preset}
+              <button
+                class="w-7 h-7 rounded-md border-2 hover:border-gray-300 transition-colors {selectedRoom.color === preset.color ? 'border-blue-500 ring-1 ring-blue-200' : 'border-gray-200'}"
+                style="background-color: {preset.color}"
+                title={preset.name}
+                onclick={() => onRoomColor(preset.color)}
+              ></button>
+            {/each}
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-500">Custom:</span>
+            <input type="color" value={selectedRoom.color ?? '#ffffff'} oninput={(e) => onRoomColor((e.target as HTMLInputElement).value)} class="w-8 h-6 rounded border border-gray-200 cursor-pointer" />
+          </div>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500">Custom:</span>
-          <input type="color" value={selectedRoom.color ?? '#ffffff'} oninput={(e) => onRoomColor((e.target as HTMLInputElement).value)} class="w-8 h-6 rounded border border-gray-200 cursor-pointer" />
-        </div>
-      </div>
-      <div>
-        <div class="flex items-center gap-1 mb-2">
-          <span class="text-xs text-gray-500">Floor Material</span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400">
-            <path d="M3 3h18v18H3z"/>
-            <path d="M8 8h8v8H8z"/>
-          </svg>
-        </div>
-        <div class="space-y-3">
-          {#each textureGroups as group}
-            <div>
-              <span class="text-xs font-medium text-gray-600 mb-1.5 block">{group.label}</span>
-              <div class="grid grid-cols-3 gap-1.5">
-                {#each group.ids as matId}
-                  {@const mat = floorMaterials.find(m => m.id === matId)}
-                  {#if mat}
-                    {@const texPath = floorTexPaths[mat.id] ?? ''}
-                    <button
-                      class="p-1 rounded-lg border-2 hover:border-gray-300 transition-all text-xs {selectedRoom.floorTexture === mat.id ? 'border-blue-500 ring-2 ring-blue-200 shadow-sm' : 'border-gray-200'}"
-                      title={mat.name}
-                      onclick={() => onRoomFloor(mat.id)}
-                    >
-                      <div
-                        class="w-full h-12 rounded-md mb-1 overflow-hidden"
-                        style={texPath ? `background-image: url(${texPath}); background-size: cover; background-position: center;` : `background-color: ${mat.id === 'none' ? (selectedRoom.color ?? mat.color) : mat.color}`}
-                      ></div>
-                      <div class="text-center leading-3 text-[10px] text-gray-600 truncate">{mat.name}</div>
-                    </button>
-                  {/if}
-                {/each}
+        <div>
+          <div class="flex items-center gap-1 mb-2">
+            <span class="text-xs text-gray-500">Floor Material</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-400">
+              <path d="M3 3h18v18H3z"/>
+              <path d="M8 8h8v8H8z"/>
+            </svg>
+          </div>
+          <div class="space-y-3">
+            {#each textureGroups as group}
+              <div>
+                <span class="text-xs font-medium text-gray-600 mb-1.5 block">{group.label}</span>
+                <div class="grid grid-cols-3 gap-1.5">
+                  {#each group.ids as matId}
+                    {@const mat = floorMaterials.find(m => m.id === matId)}
+                    {#if mat}
+                      {@const texPath = floorTexPaths[mat.id] ?? ''}
+                      <button
+                        class="p-1 rounded-lg border-2 hover:border-gray-300 transition-all text-xs {selectedRoom.floorTexture === mat.id ? 'border-blue-500 ring-2 ring-blue-200 shadow-sm' : 'border-gray-200'}"
+                        title={mat.name}
+                        onclick={() => onRoomFloor(mat.id)}
+                      >
+                        <div
+                          class="w-full h-12 rounded-md mb-1 overflow-hidden"
+                          style={texPath ? `background-image: url(${texPath}); background-size: cover; background-position: center;` : `background-color: ${mat.id === 'none' ? (selectedRoom.color ?? mat.color) : mat.color}`}
+                        ></div>
+                        <div class="text-center leading-3 text-[10px] text-gray-600 truncate">{mat.name}</div>
+                      </button>
+                    {/if}
+                  {/each}
+                </div>
               </div>
-            </div>
-          {/each}
+            {/each}
+          </div>
         </div>
-      </div>
+      {/if}
     </div>
 
   {:else if selectedEntourage}

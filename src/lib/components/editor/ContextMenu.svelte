@@ -132,9 +132,6 @@
       </button>
 
     {:else if targetType === 'room'}
-      <button class="ctx-item" role="menuitem" onclick={() => clickItem('rename-room')}>
-        <span class="ctx-icon">✏️</span> Rename Room
-      </button>
       <button class="ctx-item" role="menuitem" onclick={() => clickItem('change-floor-texture')}>
         <span class="ctx-icon">🎨</span> Change Floor Texture
       </button>

@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { selectedElementIds } from '$lib/stores/project';
+  import { selectedElementIds, selectedRoomId } from '$lib/stores/project';
   import { alignElements, type AlignmentOp } from '$lib/utils/alignment';
 
   let multiCount = $state(0);
+  let roomId: string | null = $state(null);
   selectedElementIds.subscribe(ids => { multiCount = ids.size; });
+  selectedRoomId.subscribe(id => { roomId = id; });
 
   function doAlign(op: AlignmentOp) {
     let ids: Set<string>;
@@ -23,7 +25,7 @@
   ];
 </script>
 
-{#if multiCount >= 2}
+{#if !roomId && multiCount >= 2}
   <div class="fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-gray-200 px-1.5 py-1">
     <span class="text-xs text-gray-400 px-1 select-none">{multiCount} selected</span>
     <div class="w-px h-5 bg-gray-200 mx-0.5"></div>
