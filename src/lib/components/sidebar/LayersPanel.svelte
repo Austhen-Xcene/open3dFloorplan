@@ -1,7 +1,6 @@
 <script lang="ts">
   import { activeFloor, selectedElementId, layerVisibility } from '$lib/stores/project';
   import { getCatalogItem } from '$lib/utils/furnitureCatalog';
-  import { getEntourageDef } from '$lib/utils/entourageCatalog';
   import type { Floor } from '$lib/models/types';
 
   let floor: Floor | null = $state(null);
@@ -10,7 +9,7 @@
   let selId: string | null = $state(null);
   selectedElementId.subscribe(id => { selId = id; });
 
-  let vis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, entourage: true });
+  let vis = $state({ walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true });
   layerVisibility.subscribe(v => { vis = v; });
 
   // Collapsed state per category
@@ -61,13 +60,6 @@
         return { id: fi.id, label: cat?.name ?? fi.catalogId, icon: cat?.icon ?? '📦' };
       }),
     });
-
-    if (floor.entourage?.length) {
-      cats.push({
-        key: 'entourage', label: 'Entourage', icon: '🌳',
-        items: floor.entourage.map((en, i) => ({ id: en.id, label: getEntourageDef(en.defId)?.name ?? `Custom ${i + 1}`, icon: '🌳' })),
-      });
-    }
 
     if (floor.stairs?.length) {
       cats.push({

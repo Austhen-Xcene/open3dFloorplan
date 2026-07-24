@@ -1,7 +1,7 @@
 import type { Project, Floor } from '$lib/models/types';
 import { getCatalogItem } from '$lib/utils/furnitureCatalog';
 import { detectRooms, getRoomPolygon, roomCentroid } from '$lib/utils/roomDetection';
-import { drawDoorOnWall, drawWindowOnWall, drawEntourageItems } from '$lib/utils/canvasRenderer';
+import { drawDoorOnWall, drawWindowOnWall } from '$lib/utils/canvasRenderer';
 import type { CanvasState } from '$lib/utils/canvasInteraction';
 import { projectSettings, formatArea } from '$lib/stores/settings';
 import { get } from 'svelte/store';
@@ -151,10 +151,6 @@ export function exportAsPNG(canvas: HTMLCanvasElement, project?: Project) {
         ctx.fillText(`${len} cm`, mx, my - 8);
       }
 
-      // Entourage symbols (images may need a prior on-canvas render to be cached)
-      if (floor.entourage?.length) {
-        drawEntourageItems({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor, null, project.customEntourage);
-      }
 
       // Draw doors and windows (shared full-fidelity renderer)
       drawOpeningsOnCanvas(ctx, floor, minX, minY, pad);
@@ -476,12 +472,6 @@ ${paths}</svg>`;
   download(blob, `${project.name || 'floorplan'}.svg`);
 }
 
-export function exportAs3DPNG(renderer: { domElement: HTMLCanvasElement }) {
-  renderer.domElement.toBlob((blob: Blob | null) => {
-    if (blob) download(blob, 'floorplan-3d.png');
-  });
-}
-
 export function exportPDF(project: Project) {
   const floor = project.floors.find(f => f.id === project.activeFloorId) ?? project.floors[0];
   if (!floor || floor.walls.length === 0) return;
@@ -618,10 +608,6 @@ export function exportPDF(project: Project) {
     ctx.fillText(`${len} cm`, mx, my - 8);
   }
 
-  // Entourage symbols
-  if (floor.entourage?.length) {
-    drawEntourageItems({ ctx, width: pad * 2, height: pad * 2, zoom: 1, camX: minX, camY: minY }, floor, null, project.customEntourage);
-  }
 
   // Doors and windows (shared full-fidelity renderer)
   drawOpeningsOnCanvas(ctx, floor, minX, minY, pad);
@@ -752,49 +738,6 @@ export function exportPDF(project: Project) {
     pdf.text(`${rooms.length} rooms  ·  ${floor.walls.length} walls  ·  ${floor.doors.length} doors  ·  ${floor.windows.length} windows  ·  ${floor.furniture.length} furniture items`, tX, tY);
 
     drawTitleBlock();
-  }
-
-  // ── Page 3: 3D View (if a 3D canvas exists) ──
-  const canvases = document.querySelectorAll('canvas');
-  // Look for a WebGL canvas (the 3D renderer) — typically the second canvas or one with a webgl context
-  let threeDCanvas: HTMLCanvasElement | null = null;
-  canvases.forEach(c => {
-    try {
-      if (c.getContext('webgl2') || c.getContext('webgl')) {
-        threeDCanvas = c;
-      }
-    } catch { /* ignore */ }
-  });
-  // Alternative: grab data attribute or just use last canvas if multiple
-  if (!threeDCanvas && canvases.length > 1) {
-    threeDCanvas = canvases[canvases.length - 1];
-  }
-
-  if (threeDCanvas && threeDCanvas.width > 10 && threeDCanvas.height > 10) {
-    try {
-      const img3d = threeDCanvas.toDataURL('image/png');
-      if (img3d && img3d.length > 100) {
-        pdf.addPage('a4', 'landscape');
-        drawPageBorder();
-
-        pdf.setFontSize(14);
-        pdf.setFont('helvetica', 'bold');
-        pdf.setTextColor(40);
-        pdf.text('3D Perspective View', margin + 6, margin + 12);
-
-        const da3W = pw - margin * 2 - 4;
-        const da3H = ph - margin * 2 - titleBlockH - 20;
-        const a3 = threeDCanvas.width / threeDCanvas.height;
-        let w3 = da3W;
-        let h3 = da3W / a3;
-        if (h3 > da3H) { h3 = da3H; w3 = da3H * a3; }
-        const x3 = margin + 2 + (da3W - w3) / 2;
-        const y3 = margin + 18 + (da3H - h3) / 2;
-        pdf.addImage(img3d, 'PNG', x3, y3, w3, h3);
-
-        drawTitleBlock();
-      }
-    } catch { /* 3D canvas tainted or unavailable — skip */ }
   }
 
   pdf.save(`${project.name || 'floorplan'}.pdf`);

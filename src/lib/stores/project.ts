@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Room, Stair, Column, BackgroundImage, GuideLine, ElementGroup, EntourageItem } from '$lib/models/types';
+import type { Project, Floor, Wall, Door, Window as Win, FurnitureItem, Point, Room, Stair, Column, BackgroundImage, GuideLine, ElementGroup } from '$lib/models/types';
 
 
 function uid(): string {
@@ -39,7 +39,6 @@ export const showFurnitureStore = writable<boolean>(true);
 export const selectedElementId = writable<string | null>(null);
 /** Multi-select: set of element IDs currently selected (used alongside selectedElementId for marquee/shift-click) */
 export const selectedElementIds = writable<Set<string>>(new Set());
-export const viewMode = writable<'2d' | '3d'>('2d');
 
 // Undo / Redo
 interface UndoEntry {
@@ -417,64 +416,6 @@ export const placingColumnShape = writable<'round' | 'square'>('round');
 /** Tool for placing stairs */
 export const placingStair = writable<boolean>(false);
 
-// --- Entourage (2D presentation symbols) ---
-export const placingEntourageId = writable<string | null>(null);
-
-export function addEntourageItem(defId: string, position: Point, width: number): string {
-  const id = uid();
-  mutate((f) => {
-    if (!f.entourage) f.entourage = [];
-    f.entourage.push({ id, defId, position, width, rotation: 0 });
-  }, 'Added entourage');
-  return id;
-}
-
-/** Move an entourage item without snapshotting (used during drag). */
-export function moveEntourage(id: string, position: Point) {
-  const p = get(currentProject);
-  if (!p) return;
-  const floor = p.floors.find((f) => f.id === p.activeFloorId);
-  const item = floor?.entourage?.find((e) => e.id === id);
-  if (item) {
-    item.position = position;
-    p.updatedAt = new Date();
-    currentProject.set({ ...p });
-  }
-}
-
-/** Resize an entourage item without snapshotting (used during handle drag). */
-export function resizeEntourage(id: string, width: number) {
-  const p = get(currentProject);
-  if (!p) return;
-  const floor = p.floors.find((f) => f.id === p.activeFloorId);
-  const item = floor?.entourage?.find((e) => e.id === id);
-  if (item) {
-    item.width = width;
-    p.updatedAt = new Date();
-    currentProject.set({ ...p });
-  }
-}
-
-export function updateEntourageItem(id: string, updates: Partial<EntourageItem>) {
-  mutate((f) => {
-    const e = f.entourage?.find((e) => e.id === id);
-    if (e) Object.assign(e, updates);
-  }, undefined, coalesceKeyFor('entourage', id, updates));
-}
-
-/** Register an uploaded PNG as a reusable project-level entourage symbol. */
-export function addCustomEntourage(name: string, dataUrl: string, aspect: number): string {
-  const p = get(currentProject);
-  if (!p) return '';
-  snapshot('Added custom entourage');
-  if (!p.customEntourage) p.customEntourage = [];
-  const id = uid();
-  p.customEntourage.push({ id, name, dataUrl, aspect });
-  p.updatedAt = new Date();
-  currentProject.set({ ...p });
-  return id;
-}
-
 /** Scale calibration mode */
 export const calibrationMode = writable<boolean>(false);
 export const calibrationPoints = writable<Point[]>([]);
@@ -499,7 +440,6 @@ export function removeElement(id: string) {
     if (f.stairs) f.stairs = f.stairs.filter((s) => s.id !== id);
     if (f.columns) f.columns = f.columns.filter((c) => c.id !== id);
     if (f.textAnnotations) f.textAnnotations = f.textAnnotations.filter((t) => t.id !== id);
-    if (f.entourage) f.entourage = f.entourage.filter((e) => e.id !== id);
   }, 'Deleted element');
 }
 
@@ -1299,8 +1239,8 @@ export function moveTextAnnotation(id: string, position: { x: number; y: number 
 }
 
 // Layer visibility store (used by LayersPanel and FloorPlanCanvas)
-export const layerVisibility = writable<{ walls: boolean; doors: boolean; windows: boolean; furniture: boolean; stairs: boolean; columns: boolean; guides: boolean; measurements: boolean; annotations: boolean; entourage: boolean }>({
-  walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true, entourage: true,
+export const layerVisibility = writable<{ walls: boolean; doors: boolean; windows: boolean; furniture: boolean; stairs: boolean; columns: boolean; guides: boolean; measurements: boolean; annotations: boolean }>({
+  walls: true, doors: true, windows: true, furniture: true, stairs: true, columns: true, guides: true, measurements: true, annotations: true,
 });
 
 // --- Lock ---
@@ -1352,12 +1292,6 @@ export function findGroupForElement(floor: Floor, elementId: string): ElementGro
   if (!floor.groups) return undefined;
   return floor.groups.find(g => g.elementIds.includes(elementId));
 }
-
-/** Wall id whose face-on elevation editor is open (null = closed) */
-export const elevationWallId = writable<string | null>(null);
-/** Armed when Elevation is requested with no wall selected: the next wall
- *  clicked in the plan canvas opens its elevation; empty click / Esc cancels */
-export const elevationPickMode = writable<boolean>(false);
 
 // Zoom store for 2D canvas — shared between FloorPlanCanvas and TopBar
 export const canvasZoom = writable<number>(1);

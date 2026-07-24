@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { base } from '$app/paths';
-  import { currentProject, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, loadProject, createDefaultProject, canvasZoom, panMode, selectedTool, activeFloor, selectedElementId, elevationWallId, elevationPickMode } from '$lib/stores/project';
+  import { currentProject, undo, redo, addFloor, removeFloor, setActiveFloor, updateProjectName, loadProject, createDefaultProject, canvasZoom, panMode, selectedTool } from '$lib/stores/project';
   import { localStore } from '$lib/services/datastore';
   import { get } from 'svelte/store';
   import type { Floor, Project } from '$lib/models/types';
@@ -23,8 +23,6 @@
   // Mobile (< md) overflow menu for secondary actions
   let moreOpen = $state(false);
   let moreRef: HTMLDivElement | undefined = $state();
-  // Elevation code is retained for future use, but the current product is Plan-only.
-  const ENABLE_ELEVATION_VIEW = false;
 
   currentProject.subscribe((p) => {
     if (p) {
@@ -33,38 +31,6 @@
       activeFloorId = p.activeFloorId;
     }
   });
-  /** Switch the 2D canvas area to the integrated elevation view.
-   *  With a wall selected it opens that wall; otherwise it stays in Plan and
-   *  arms pick mode — the next wall clicked in the canvas opens its elevation.
-   */
-  function enterElevation() {
-    const floor = get(activeFloor);
-    const selId = get(selectedElementId);
-    const wall = selId ? floor?.walls.find((w) => w.id === selId) : undefined;
-    if (wall) {
-      elevationPickMode.set(false);
-      selectedElementId.set(wall.id);
-      elevationWallId.set(wall.id);
-    } else {
-      // No wall selected — prompt the user to pick one on the plan canvas
-      elevationPickMode.update((v) => !v); // pressing again cancels
-    }
-    moreOpen = false;
-  }
-
-  /** Return the 2D canvas area to the plan view */
-  function exitElevation() {
-    elevationWallId.set(null);
-    elevationPickMode.set(false);
-    moreOpen = false;
-  }
-
-  /** Mobile overflow item: toggle between plan and elevation */
-  function toggleElevationView() {
-    if (get(elevationWallId)) exitElevation();
-    else enterElevation();
-  }
-
   function onNameBlur() {
     editingName = false;
     updateProjectName(projectName);
@@ -322,30 +288,6 @@
 
   <div class="h-5 w-px bg-white/20 max-md:hidden"></div>
 
-  {#if ENABLE_ELEVATION_VIEW}
-    <!-- Disabled for the Plan-only workflow; retained for future reactivation. -->
-    <div class="flex bg-white/15 rounded-full p-0.5 max-md:hidden">
-      <button
-        onclick={exitElevation}
-        class="px-3 py-1 text-xs font-semibold rounded-full transition-colors flex items-center gap-1.5 {!$elevationWallId ? 'bg-white text-slate-800' : 'text-white/80 hover:text-white'}"
-        title="Plan view — top-down floor plan"
-        aria-pressed={!$elevationWallId}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M3 12h8"/><path d="M11 12v9"/><path d="M15 3v6"/></svg>
-        <span>Plan</span>
-      </button>
-      <button
-        onclick={enterElevation}
-        class="px-3 py-1 text-xs font-semibold rounded-full transition-colors flex items-center gap-1.5 {$elevationWallId ? 'bg-white text-slate-800' : $elevationPickMode ? 'bg-blue-500 text-white' : 'text-white/80 hover:text-white'}"
-        title={$elevationPickMode ? 'Pick a wall in the plan to view its elevation — press again or Esc to cancel' : 'Elevation view — the selected wall face-on, or pick one on the plan'}
-        aria-pressed={!!$elevationWallId || $elevationPickMode}
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9H3z"/><rect x="10" y="14" width="4" height="6"/><rect x="5.5" y="13" width="3" height="3"/></svg>
-        <span>Elevation</span>
-      </button>
-    </div>
-  {/if}
-
   <!-- Zoom controls (Plan only; mobile uses pinch + overflow menu) -->
   <div class="flex items-center gap-1 bg-white/15 rounded-full p-0.5 max-md:hidden">
       <button
@@ -413,10 +355,6 @@
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => canvasZoom.set(1)}>Reset Zoom ({Math.round($canvasZoom * 100)}%)</button>
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => panMode.update(v => !v)}>{$panMode ? '✓ ' : ''}Pan Mode</button>
         <div class="h-px bg-gray-100 my-1"></div>
-        {#if ENABLE_ELEVATION_VIEW}
-          <!-- Disabled for the Plan-only workflow; retained for future reactivation. -->
-          <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={toggleElevationView}>{$elevationWallId ? '✓ ' : ''}Elevation View</button>
-        {/if}
         <button class="w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" onclick={() => { areaOpen = true; moreOpen = false; }}>Resumo de áreas</button>
       </div>
     {/if}

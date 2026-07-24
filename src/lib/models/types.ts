@@ -139,25 +139,6 @@ export interface BackgroundImage {
   locked: boolean;
 }
 
-/** A placed 2D entourage symbol (person, car, tree, …) for presentation plans */
-export interface EntourageItem {
-  id: string;
-  defId: string; // id of a built-in EntourageDef or a project CustomEntourageDef
-  position: Point; // center, world cm
-  width: number; // real-world width in cm
-  rotation: number; // degrees
-  opacity?: number; // 0–1, default 1
-  locked?: boolean;
-}
-
-/** User-uploaded PNG entourage symbol, stored on the project */
-export interface CustomEntourageDef {
-  id: string;
-  name: string;
-  dataUrl: string; // PNG as data URL
-  aspect: number; // height / width
-}
-
 export interface Floor {
   id: string;
   name: string;
@@ -175,7 +156,6 @@ export interface Floor {
   annotations: Annotation[];
   textAnnotations: TextAnnotation[];
   groups: ElementGroup[];
-  entourage?: EntourageItem[];
 }
 
 export interface Project {
@@ -186,5 +166,4 @@ export interface Project {
   activeFloorId: string;
   createdAt: Date;
   updatedAt: Date;
-  customEntourage?: CustomEntourageDef[];
 }

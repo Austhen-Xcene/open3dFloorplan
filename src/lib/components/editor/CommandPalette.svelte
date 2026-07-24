@@ -1,6 +1,6 @@
 <script lang="ts">
   import { furnitureCatalog } from '$lib/utils/furnitureCatalog';
-  import { selectedTool, snapEnabled, placingFurnitureId, undo, redo, currentProject, viewMode } from '$lib/stores/project';
+  import { selectedTool, snapEnabled, placingFurnitureId, undo, redo, currentProject } from '$lib/stores/project';
   import { exportAsPNG, exportAsJSON, exportAsSVG, exportPDF } from '$lib/utils/export';
   import { exportDXF } from '$lib/utils/cadExport';
   import { get } from 'svelte/store';
@@ -46,9 +46,7 @@
     { id: 'a-zoom-fit', name: 'Zoom to Fit', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true })); } },
     { id: 'a-undo', name: 'Undo', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => undo() },
     { id: 'a-redo', name: 'Redo', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => redo() },
-    { id: 'a-settings', name: 'Settings', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => { window.dispatchEvent(new CustomEvent('open-settings')); } },
     { id: 'a-new-project', name: 'New Project', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => goto(base || '/') },
-    { id: 'a-toggle-3d', name: 'Toggle 2D/3D', icon: '⚡', category: 'action', categoryLabel: '⚡ Action', action: () => { viewMode.update(m => m === '2d' ? '3d' : '2d'); } },
   ];
 
   const furnitureItems: ResultItem[] = furnitureCatalog.map(f => ({
