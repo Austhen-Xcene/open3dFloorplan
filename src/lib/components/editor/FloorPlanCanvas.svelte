@@ -29,6 +29,9 @@
   import type { ProjectSettings } from '$lib/stores/settings';
   import type { CanvasState } from '$lib/utils/canvasInteraction';
 
+  /** Altura do botão "Girar ambiente", em px (h-9). Usada para decidir se ele cabe acima. */
+  const ALTURA_BOTAO_GIRAR = 36;
+
   /** Estado de interface do canvas — ver canvas/estadoCanvas.svelte.ts */
   const ui = new EstadoCanvas();
 
@@ -259,10 +262,15 @@
   {#if ui.currentSelectedRoomId && ui.currentFloor && ui.currentTool === 'select'}
     {@const bbox = bboxDoAmbienteSelecionado()}
     {#if bbox}
-      {@const pos = worldToScreen((bbox.minX + bbox.maxX) / 2, bbox.minY)}
+      {@const acima = worldToScreen((bbox.minX + bbox.maxX) / 2, bbox.minY)}
+      {@const abaixo = worldToScreen((bbox.minX + bbox.maxX) / 2, bbox.maxY)}
+      <!-- Com o ambiente colado no topo não há espaço acima e o botão sumia atrás da
+           barra superior, virando inclicável. Nesse caso ele vai para baixo. -->
+      {@const cabeAcima = acima.y - 8 >= ALTURA_BOTAO_GIRAR}
+      {@const pos = cabeAcima ? { x: acima.x, y: acima.y - 8 } : { x: abaixo.x, y: abaixo.y + 8 + ALTURA_BOTAO_GIRAR }}
       <button
         class="absolute z-50 h-9 flex items-center gap-2 rounded-lg bg-slate-800 px-4 text-sm font-medium text-blue-300 shadow-lg hover:bg-slate-700 hover:text-blue-200 transition-colors"
-        style="left: {pos.x}px; top: {pos.y - 8}px; transform: translate(-50%, -100%);"
+        style="left: {pos.x}px; top: {pos.y}px; transform: translate(-50%, -100%);"
         title="Girar ambiente 90°"
         aria-label="Girar ambiente 90 graus"
         onclick={rotateSelectedRoom}

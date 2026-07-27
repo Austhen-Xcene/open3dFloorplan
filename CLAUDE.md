@@ -112,7 +112,7 @@ corrija antes de seguir.
 npm install
 npm run dev       # http://localhost:5173
 npm run check     # svelte-check + TS
-npm test          # Playwright: 60 testes de interface (sobe o dev sozinho)
+npm test          # Playwright: 62 testes de interface (sobe o dev sozinho)
 npm run build
 npm run preview
 ```
@@ -368,6 +368,10 @@ espelhando `docs/ui/`.
   "não há sobreposição" logo após uma ação passa lendo o estado ANTERIOR, porque a gravação é
   debounced. Espere um sinal positivo primeiro (`esperarLarguraGravada`), depois afirme a
   ausência. Isso já mascarou um bug real uma vez.
+- **Reproduza o caso do usuário, não uma versão simplificada dele.** Um teste com dois
+  ambientes deu o bug 8 por resolvido enquanto ele continuava acontecendo com cinco. Se o relato
+  fala em "fui mexendo", o teste tem de mexer: sequência de ações, verificando o estado inteiro
+  a cada passo.
 - **Geometria específica se semeia, não se constrói pela UI.** O posicionamento automático
   depende de nomes e ordem de inserção. Use `abrirEditorCom()` para montar a planta exata.
 - **Documente o comportamento atual, não o desejado.** Se algo está errado, o teste registra o

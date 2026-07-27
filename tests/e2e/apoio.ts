@@ -198,3 +198,19 @@ export async function esperarLarguraGravada(page: Page, nome: string, larguraCm:
     return alvo ? Math.round(alvo.maxX - alvo.minX) : -1;
   }, { timeout: 10_000 }).toBe(larguraCm);
 }
+
+/**
+ * Espera a gravação (debounce de 500 ms) parar de mudar.
+ *
+ * Necessário antes de afirmar ausência de sobreposição: `expect.poll` para no primeiro
+ * acerto e uma leitura do estado ANTERIOR passaria por engano.
+ */
+export async function esperarPlantaEstavel(page: Page) {
+  let anterior = '';
+  await expect.poll(async () => {
+    const atual = JSON.stringify(await limitesDosAmbientes(page));
+    const estavel = atual === anterior && atual !== '[]';
+    anterior = atual;
+    return estavel;
+  }, { timeout: 10_000, intervals: [300, 300, 300, 300, 300] }).toBe(true);
+}

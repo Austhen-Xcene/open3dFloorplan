@@ -32,7 +32,7 @@ npx playwright test -g grade # roda só o que casa com "grade"
 
 ## Estado da verificação
 
-Última execução: **60 testes, 60 passando**.
+Última execução: **62 testes, 62 passando**.
 
 Achados e correções estão em [ACHADOS.md](ACHADOS.md).
 

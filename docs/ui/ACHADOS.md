@@ -91,12 +91,36 @@ Por isso o sintoma era intermitente: com vizinhos adjacentes o reflow resolvia; 
 solto, não. E clicar no ambiente de novo consertava, porque só o `mouseup` chamava
 `resolveRoomOverlap`.
 
-**Correção:** `rotateRoom90` chama `resolveRoomOverlap` ao final. Como essa função escreve sem
-snapshot, um único desfazer continua revertendo a rotação inteira, reacomodação incluída.
-**Teste:** `09-rotacao.spec.ts` → "girar contra vizinho NÃO adjacente também se reacomoda".
+**Correção, em duas partes.** A primeira tentativa — chamar `resolveRoomOverlap(idGirado)` ao
+final de `rotateRoom90` — **não bastou**, e o usuário reportou de novo com a planta em outro
+estado. Duas falhas na função original:
 
-Este caso não aparecia com a inserção pelo formulário — o posicionamento automático depende de
-nomes e ordem. O teste usa `abrirEditorCom()`, que semeia o projeto com geometria exata.
+1. **Resolvia um ambiente só.** Girar reacomoda os vizinhos conectados, e um vizinho empurrado
+   pode cair sobre um terceiro — par que nem inclui o ambiente girado.
+2. **Desistia em silêncio.** A busca só testava deslocamentos derivados das bordas dos
+   obstáculos; sem candidato livre, retornava `false` e deixava a sobreposição.
+
+`resolveRoomOverlap` foi reescrita para varrer a planta inteira: acha o par em conflito, move
+quem *não* é o ambiente em que o usuário mexeu, e repete até não sobrar conflito (teto de 60
+passadas). Quando nenhuma saída fica livre, usa a mais curta mesmo — a passada seguinte resolve o
+resto, em vez de abandonar.
+
+Segue sem snapshot próprio: um único desfazer reverte a rotação inteira, reacomodação incluída.
+
+**Testes:** `09-rotacao.spec.ts` → "girar contra vizinho NÃO adjacente" e "sequência de rotações
+mantém a planta inteira consistente" (8 rotações em 5 ambientes, verificando todos os pares a
+cada passo). Este caso não aparece com a inserção pelo formulário — o posicionamento automático
+depende de nomes e ordem — então o teste usa `abrirEditorCom()`, que semeia geometria exata.
+
+### 9. Botão "Girar ambiente" ficava inclicável com o ambiente no topo
+**Origem:** pré-existente · **Gravidade:** média · **Encontrado ao testar o achado 8**
+
+O botão é ancorado acima do ambiente (`translate(-50%, -100%)`). Com o ambiente colado no topo do
+canvas ele saía da área visível e caía atrás da barra superior, que interceptava o clique.
+
+**Correção:** quando não há espaço acima, o botão vai para baixo do ambiente.
+**Teste:** `09-rotacao.spec.ts` → "o botão de girar continua clicável com o ambiente colado no
+topo".
 
 ## Abertos
 

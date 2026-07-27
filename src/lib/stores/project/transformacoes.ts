@@ -160,68 +160,112 @@ export function rotateRoom90(roomId: string): boolean {
 }
 
 /**
- * If a moved room overlaps another room, place it against the nearest free
- * boundary. Touching edges are allowed; intersecting interiors are not.
- * This intentionally does not create its own undo snapshot because it is the
- * final step of the room drag already in progress.
+ * Reacomoda os ambientes até nenhum ficar por cima de outro.
+ *
+ * Resolve a planta INTEIRA, não só `idPrioritario`. Uma operação pode mover vários
+ * ambientes de uma vez — girar reacomoda os vizinhos conectados — e o par que acaba
+ * sobreposto nem sempre inclui aquele em que o usuário mexeu.
+ *
+ * `idPrioritario` é o ambiente que o usuário acabou de mover ou girar: ele fica onde
+ * está, e quem sai da frente é o outro. Sem isso, o ambiente escaparia debaixo do cursor.
+ *
+ * Encostar é permitido; sobrepor interior não é. Não cria snapshot próprio — é o passo
+ * final de uma operação que já tem o seu.
  */
-export function resolveRoomOverlap(roomId: string): boolean {
+export function resolveRoomOverlap(idPrioritario?: string): boolean {
   const p = get(currentProject);
   if (!p) return false;
   const floor = p.floors.find((item) => item.id === p.activeFloorId);
-  const room = floor?.rooms.find((item) => item.id === roomId);
-  if (!floor || !room) return false;
+  if (!floor) return false;
 
-  const target = roomBoundsOnFloor(floor, room);
-  if (!target) return false;
-  const obstacles = floor.rooms
-    .filter((item) => item.id !== roomId)
-    .map((item) => roomBoundsOnFloor(floor, item))
-    .filter((bounds): bounds is RoomBounds => Boolean(bounds));
-  if (obstacles.length === 0) return false;
+  /** Sobreposição menor que isto é encoste, não invasão. */
+  const EPSILON = 0.01;
+  /** Teto de passadas. Cada passada separa um par; o limite evita laço infinito se
+   *  a planta estiver numa configuração que não converge. */
+  const MAX_PASSADAS = 60;
 
-  const epsilon = 0.01;
-  const intersects = (a: RoomBounds, b: RoomBounds) =>
-    Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) > epsilon
-    && Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY) > epsilon;
-  if (!obstacles.some((bounds) => intersects(target, bounds))) return false;
-
-  const xCandidates = new Set<number>([0]);
-  const yCandidates = new Set<number>([0]);
-  for (const obstacle of obstacles) {
-    xCandidates.add(obstacle.minX - target.maxX);
-    xCandidates.add(obstacle.maxX - target.minX);
-    yCandidates.add(obstacle.minY - target.maxY);
-    yCandidates.add(obstacle.maxY - target.minY);
+  const caixas = new Map<string, RoomBounds>();
+  for (const ambiente of floor.rooms) {
+    const b = roomBoundsOnFloor(floor, ambiente);
+    if (b) caixas.set(ambiente.id, { ...b });
   }
+  if (caixas.size < 2) return false;
 
-  let best: Point | null = null;
-  let bestCost = Infinity;
-  let bestAxes = Infinity;
-  for (const dx of xCandidates) {
-    for (const dy of yCandidates) {
-      if (Math.abs(dx) <= epsilon && Math.abs(dy) <= epsilon) continue;
-      const moved = {
-        minX: target.minX + dx,
-        maxX: target.maxX + dx,
-        minY: target.minY + dy,
-        maxY: target.maxY + dy,
-      };
-      if (obstacles.some((bounds) => intersects(moved, bounds))) continue;
-      const cost = dx * dx + dy * dy;
-      const axes = Number(Math.abs(dx) > epsilon) + Number(Math.abs(dy) > epsilon);
-      if (cost < bestCost - epsilon || (Math.abs(cost - bestCost) <= epsilon && axes < bestAxes)) {
-        best = { x: dx, y: dy };
-        bestCost = cost;
-        bestAxes = axes;
+  const invade = (a: RoomBounds, b: RoomBounds) =>
+    Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX) > EPSILON
+    && Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY) > EPSILON;
+
+  const deslocado = (b: RoomBounds, dx: number, dy: number): RoomBounds =>
+    ({ minX: b.minX + dx, maxX: b.maxX + dx, minY: b.minY + dy, maxY: b.maxY + dy });
+
+  /** Primeiro par que se invade, ou null. */
+  function proximoConflito(): [string, string] | null {
+    const ids = [...caixas.keys()];
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        if (invade(caixas.get(ids[i])!, caixas.get(ids[j])!)) return [ids[i], ids[j]];
       }
     }
+    return null;
   }
-  if (!best) return false;
 
-  translateSavedRooms(floor, new Map([[roomId, best]]), new Set());
+  const acumulado = new Map<string, Point>();
+  let mudou = false;
+
+  for (let passada = 0; passada < MAX_PASSADAS; passada++) {
+    const conflito = proximoConflito();
+    if (!conflito) break;
+
+    // Quem sai da frente: nunca o ambiente em que o usuário mexeu.
+    const [primeiro, segundo] = conflito;
+    const move = primeiro === idPrioritario ? segundo : primeiro;
+    const fica = move === primeiro ? segundo : primeiro;
+
+    const alvo = caixas.get(move)!;
+    const obstaculo = caixas.get(fica)!;
+
+    // Quatro saídas possíveis; sempre existe uma que separa este par.
+    const saidas: Point[] = [
+      { x: obstaculo.minX - alvo.maxX, y: 0 },
+      { x: obstaculo.maxX - alvo.minX, y: 0 },
+      { x: 0, y: obstaculo.minY - alvo.maxY },
+      { x: 0, y: obstaculo.maxY - alvo.minY },
+    ];
+    const outros = [...caixas.entries()].filter(([id]) => id !== move);
+
+    // Prefere a saída mais curta que não crie conflito novo; se todas criarem,
+    // usa a mais curta mesmo — a próxima passada resolve o que sobrar.
+    let escolhida: Point | null = null;
+    let menorCusto = Infinity;
+    let escolhidaLivre: Point | null = null;
+    let menorCustoLivre = Infinity;
+    for (const saida of saidas) {
+      const custo = saida.x * saida.x + saida.y * saida.y;
+      if (custo <= EPSILON) continue;
+      const novaCaixa = deslocado(alvo, saida.x, saida.y);
+      const livre = !outros.some(([, b]) => invade(novaCaixa, b));
+      if (livre && custo < menorCustoLivre) { menorCustoLivre = custo; escolhidaLivre = saida; }
+      if (custo < menorCusto) { menorCusto = custo; escolhida = saida; }
+    }
+
+    const passo = escolhidaLivre ?? escolhida;
+    if (!passo) break;
+
+    caixas.set(move, deslocado(alvo, passo.x, passo.y));
+    const antes = acumulado.get(move) ?? { x: 0, y: 0 };
+    acumulado.set(move, { x: antes.x + passo.x, y: antes.y + passo.y });
+    mudou = true;
+  }
+
+  if (!mudou) return false;
+
+  const movimentos = new Map(
+    [...acumulado].filter(([, d]) => Math.abs(d.x) > EPSILON || Math.abs(d.y) > EPSILON),
+  );
+  if (movimentos.size === 0) return false;
+
+  translateSavedRooms(floor, movimentos, new Set());
   p.updatedAt = new Date();
   currentProject.set({ ...p });
   return true;
 }
-
