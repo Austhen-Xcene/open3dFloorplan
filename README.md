@@ -1,12 +1,11 @@
-# Studio SHC — Planta de Equipamentos
+# Editor de plantas 2D
 
-Editor **2D** de plantas onde o usuário monta o projeto da própria casa e distribui visualmente
-os **equipamentos de automação do Studio SHC** dentro de cada ambiente — enxergando em qual
-equipamento e em qual saída cada carga está ligada.
+Editor **2D** onde o usuário monta a planta da própria casa: cria ambientes com medidas exatas,
+posiciona portas, janelas e objetos, e exporta o resultado.
 
-É um **site independente**, aberto no navegador: sem backend, sem API e sem vínculo em tempo de
-execução com o app Studio SHC. O catálogo de equipamentos é mantido neste repositório, e o
-projeto do usuário fica salvo no próprio navegador, podendo ser exportado e importado.
+É um **site independente**, aberto no navegador: sem backend e sem API. O catálogo é mantido
+neste repositório, e o projeto do usuário fica salvo no próprio navegador, podendo ser exportado
+e importado.
 
 ## Funcionalidades
 
@@ -15,7 +14,7 @@ projeto do usuário fica salvo no próprio navegador, podendo ser exportado e im
 - Movimentação, rotação e redimensionamento sem sobreposição.
 - Preservação das paredes independentes entre ambientes vizinhos.
 - Organização do projeto em múltiplos pavimentos.
-- Biblioteca de portas, janelas e equipamentos, com símbolo 2D próprio.
+- Biblioteca de portas, janelas e objetos, com símbolo 2D próprio.
 - Zoom, pan, minimapa, grade e snap magnético.
 - Resumo de quantidade e área dos ambientes.
 - Exportação em PNG, SVG, DXF, DWG, PDF e JSON; importação de JSON do editor.

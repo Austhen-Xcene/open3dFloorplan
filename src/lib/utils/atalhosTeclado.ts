@@ -101,7 +101,7 @@ export const gruposAtalhos: GrupoAtalhos[] = [
 
 /** Versão em texto puro, para a área de transferência. */
 export function atalhosComoTexto(): string {
-  const linhas = ['ATALHOS DE TECLADO — Studio SHC Planta', ''];
+  const linhas = ['ATALHOS DE TECLADO — Editor de plantas', ''];
   for (const grupo of gruposAtalhos) {
     linhas.push(`── ${grupo.titulo.toUpperCase()} ──`);
     for (const a of grupo.atalhos) {

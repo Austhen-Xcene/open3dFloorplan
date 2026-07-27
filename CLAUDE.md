@@ -4,31 +4,31 @@ Contexto do projeto para o Claude Code. Leia antes de qualquer alteração.
 
 ## 1. O que é este projeto
 
-**Site independente** onde o usuário monta a planta 2D da própria casa, distribui visualmente os
-**equipamentos de automação do Studio SHC** dentro de cada ambiente, e enxerga **em qual
-equipamento e em qual saída** cada carga está ligada.
+**Site independente** onde o usuário monta a planta 2D da própria casa: cria ambientes com
+medidas exatas, posiciona portas, janelas e objetos, e exporta o resultado.
 
 ### O que este projeto NÃO é
 
-Estas linhas existem porque a premissa já mudou uma vez. Não reintroduza nada disto sem o
-usuário pedir explicitamente:
-
-- ❌ **Não conversa com o Studio SHC.** Sem API, sem backend, sem autenticação, sem sincronizar
-  a tabela de entradas e saídas do app. O site é desvinculado.
-- ❌ **Não roda dentro de webview.** Sem Flutter, sem ponte JS, sem modo embarcado, sem
-  `modoIncorporado`. É um site aberto no navegador, e só.
-- ❌ **Não busca o catálogo de lugar nenhum.** Os equipamentos são uma tabela **mantida no
-  repositório**, atualizada por commit.
+- ❌ **Não tem backend.** Sem API, sem servidor de dados, sem autenticação, sem sessão. Se uma
+  tarefa parece pedir servidor, resolva no cliente ou pergunte — não invente endpoint.
+- ❌ **Não roda dentro de webview.** É um site aberto no navegador, e só.
+- ❌ **Não busca o catálogo de lugar nenhum.** O catálogo é uma tabela mantida no repositório,
+  atualizada por commit.
 
 Consequência prática: tudo é client-side. O projeto do usuário vive no `localStorage` e sai por
-exportação (JSON, PNG, SVG, PDF, DXF, DWG). `services/datastore.ts` continua sendo a interface
-de persistência, mas com uma implementação só — `localStore`.
+exportação (JSON, PNG, SVG, PDF, DXF, DWG). `services/datastore.ts` é a interface de
+persistência, com uma implementação só — `localStore`.
 
 ### Origem
 
-O repositório nasceu do `open3dFloorplan` (editor genérico de plantas com catálogo de móveis:
-cama, sofá, armário…). Esse catálogo de móveis é **legado a ser substituído** pelo catálogo de
-equipamentos SHC. Ver §7.
+O repositório nasceu do `open3dFloorplan`, um editor de plantas com renderização 3D. O 3D foi
+removido; o que ficou é o editor 2D, traduzido para PT-BR e reorganizado.
+
+### Direção de produto
+
+**Ainda não definida.** O que existe hoje é o editor 2D descrito acima. Não presuma um rumo a
+partir de nomes de arquivo ou de conversas anteriores — pergunte ao usuário antes de escrever
+código que só faz sentido para um produto específico.
 
 ## 2. Restrições inegociáveis
 
@@ -172,7 +172,7 @@ src/lib/
     hitTesting.ts          #   o que está sob o ponto clicado
     roomDetection.ts, ambientesGeometria.ts, reconciliarAmbientes.ts
     encaixeParede.ts, catalogThumbnails.ts, atalhosTeclado.ts
-    furnitureCatalog.ts    #   catálogo atual (vira o catálogo de equipamentos SHC)
+    furnitureCatalog.ts    #   catálogo de objetos: id, categoria, cor, medidas em cm
 
   components/
     editor/
@@ -212,7 +212,6 @@ O desenho monta um `CanvasState` (`{ ctx, width, height, zoom, camX, camY }`) e 
   mais `geometria` (comprimento de parede, mundo→tela) compartilhada por todos.
 - **ícone 2D de cada item** → `utils/icones/` → `drawFurnitureIcon(ctx, catalogId, w, d, color, stroke)`,
   que despacha por `iconDrawers[catalogId]`. Sem entrada no mapa, cai num retângulo genérico.
-  **É aqui que entram os símbolos dos equipamentos SHC.**
 - **converter coordenadas / snap** → `utils/canvasInteraction.ts` (`screenToWorld`,
   `worldToScreen`, `snap`, `magneticSnap`, `angleSnap`)
 - **descobrir o que foi clicado** → `utils/hitTesting.ts` (`findWallAt`, `findFurnitureAt`,
@@ -272,53 +271,26 @@ neste repo.
 
 ## 5. Convenções
 
-- **Nomes novos em PT-BR**: `catalogoEquipamentos`, `EquipamentoSHC`, `adicionarEquipamento`,
-  `ambiente`, `saida`, `entrada`, `circuito`.
+- **Nomes novos em PT-BR**: `ambiente`, `parede`, `abertura`, `pavimento`, `adicionarAmbiente`.
 - Arquivos: `camelCase.ts` para utils/stores, `PascalCase.svelte` para componentes.
 - Sem framework de ícones: SVG inline nos componentes, `canvas` para símbolos da planta.
 - Tailwind direto no markup; sem CSS global novo (`src/app.css` só tem reset/scrollbar/tema).
 - Mensagens de commit: `feat:` / `fix:` / `ux:` / `docs:` — como no histórico.
 
-## 6. Entradas, saídas e ligações
+## 6. Trabalho pendente
 
-É o diferencial do produto e vive **inteiro dentro deste projeto** — não há nada para sincronizar
-com o Studio SHC.
+Não há roadmap de produto definido (ver §1). O que está pendente é técnico:
 
-Cada equipamento do catálogo declara quantas **entradas** e quantas **saídas** tem. O projeto do
-usuário guarda as **ligações**: qual carga (ponto de luz, tomada, motor…) está ligada em qual
-saída de qual equipamento.
+1. **Testes unitários das funções puras de `utils/`** — geometria de parede, detecção de
+   ambiente, encaixe e reconciliação. São as mais fáceis de testar e as mais fáceis de quebrar
+   numa refatoração. A suíte de interface (§9) cobre o comportamento, não os cálculos.
+2. **Catálogo em PT-BR** — as categorias de `utils/furnitureCatalog.ts` (`Living Room`,
+   `Electrical`, `Plumbing`…) ainda aparecem em inglês na interface.
+3. **Arquivos na zona de atenção (300–400 linhas)** — `houseTemplates`, `PrintLayout`,
+   `FloorPlanCanvas`, `roomDetection`, `renderizador/paredes`, `interacao/mouseMove`. Dentro da
+   regra, mas quebre antes de crescer.
 
-O que o usuário precisa conseguir fazer:
-
-- posicionar o equipamento no ambiente onde ele fisicamente fica;
-- ligar uma carga a uma saída livre e ver isso representado na planta;
-- selecionar um equipamento e enxergar tudo que depende dele;
-- selecionar uma carga e enxergar de onde ela vem;
-- saber quantas saídas ainda estão livres em cada equipamento.
-
-Regras que decorrem disso:
-
-- A ligação é dado do **projeto**, não do catálogo — mora no `Floor`, junto com os elementos.
-- Toda alteração de ligação passa por `mutate` como qualquer outra (undo/redo funciona).
-- Uma saída não pode receber duas cargas; a validação é responsabilidade da store, não da UI.
-- Apagar um equipamento tem que soltar as ligações dele — senão sobra referência órfã que some
-  silenciosamente no desenho.
-
-## 7. Evolução planejada (ordem sugerida)
-
-1. **Modelo de equipamento** — novo tipo `EquipamentoSHC` (id, categoria, símbolo, nº de entradas
-   e saídas, tensão/carga) e `EquipamentoInstalado` no `Floor`, substituindo `FurnitureItem`.
-2. **Catálogo** — trocar `utils/furnitureCatalog.ts` pelo catálogo SHC, mantido no repositório.
-   A seção `Electrical` / `Plumbing` do catálogo atual (itens com `symbol: true`) é o modelo mais
-   próximo do alvo. Divida por domínio (`catalogo/modulos.ts`, `catalogo/sensores.ts`, …) com um
-   `index.ts` que agrega — a tabela inteira estoura o limite de linhas rapidinho.
-3. **Símbolos 2D** — desenhar cada equipamento em `utils/icones/` (padrão de símbolo elétrico,
-   não desenho de móvel).
-4. **Ligações** — estrutura de ligação nos tipos, validação na store e desenho da conexão
-   *carga → saída → equipamento* no renderizador, com destaque ao selecionar.
-5. **Limpeza final** — remover o catálogo de móveis quando o de equipamentos estiver completo.
-
-## 8. Dívida técnica
+## 7. Dívida técnica
 
 ### Resolvida
 
@@ -345,15 +317,15 @@ Regras que decorrem disso:
 - `src/lib/firebase.ts` só carrega o Analytics (importado sob demanda em `+layout.svelte`). O
   Firebase aqui é **destino de deploy** (App Hosting), não backend de dados — não confunda os
   dois nem o use como porta de entrada para armazenar projeto fora do navegador.
-- Tudo em §7 ainda por fazer (modelo de equipamento, catálogo, símbolos 2D, ligações).
+- Ver §6 para o que segue pendente.
 
-## 9. Branches
+## 8. Branches
 
 - `agent/*` — desenvolvimento de cada alteração
 - `dev` — QA / homologação (branch atual)
 - `main` — versão aprovada
 
-## 10. Testes de interface
+## 9. Testes de interface
 
 `tests/e2e/` (Playwright) é a única rede de segurança do projeto. Um arquivo por área da UI,
 espelhando `docs/ui/`.

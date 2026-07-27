@@ -78,7 +78,7 @@ sem depender da seleção múltipla.
 `Floor N` → `Pavimento N`, e o campo da paleta de comandos → `Buscar objetos, ferramentas, ações…`.
 
 Restam as **categorias do catálogo** (`Living Room`, `Electrical`, `Plumbing`), que saem direto de
-`furnitureCatalog.ts` e somem sozinhas na troca pelo catálogo SHC (`CLAUDE.md` §7, passo 2).
+`furnitureCatalog.ts` — ver `CLAUDE.md` §6, item 2.
 
 ## Abertos
 
