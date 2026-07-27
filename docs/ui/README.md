@@ -28,10 +28,11 @@ npx playwright test -g grade # roda só o que casa com "grade"
 | [06-historico](06-historico/documento.md) | Desfazer e refazer | `stores/project/historico.ts` |
 | [07-catalogo](07-catalogo/documento.md) | Portas, janelas e catálogo de objetos | `sidebar/build/*` |
 | [08-persistencia-exportacao](08-persistencia-exportacao/documento.md) | Auto-save, recarregar, exportar, atalhos | `services/datastore.ts`, `utils/exportacao/*` |
+| 09-rotacao | Girar ambiente sem sobrepor vizinhos | `stores/project/transformacoes.ts` |
 
 ## Estado da verificação
 
-Última execução: **56 testes, 56 passando**.
+Última execução: **60 testes, 60 passando**.
 
 Achados e correções estão em [ACHADOS.md](ACHADOS.md).
 

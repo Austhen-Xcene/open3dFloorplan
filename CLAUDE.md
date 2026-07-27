@@ -112,7 +112,7 @@ corrija antes de seguir.
 npm install
 npm run dev       # http://localhost:5173
 npm run check     # svelte-check + TS
-npm test          # Playwright: 56 testes de interface (sobe o dev sozinho)
+npm test          # Playwright: 60 testes de interface (sobe o dev sozinho)
 npm run build
 npm run preview
 ```
@@ -364,6 +364,12 @@ espelhando `docs/ui/`.
   bug 1 de `ACHADOS.md` sobreviveu tanto tempo.
 - **O `localStorage` é gravado com debounce de 500 ms.** Ao conferir o projeto salvo, use
   `expect.poll`, nunca leitura direta logo após a ação.
+- **Cuidado com `expect.poll` para condição negativa.** Ele para no primeiro acerto: afirmar
+  "não há sobreposição" logo após uma ação passa lendo o estado ANTERIOR, porque a gravação é
+  debounced. Espere um sinal positivo primeiro (`esperarLarguraGravada`), depois afirme a
+  ausência. Isso já mascarou um bug real uma vez.
+- **Geometria específica se semeia, não se constrói pela UI.** O posicionamento automático
+  depende de nomes e ordem de inserção. Use `abrirEditorCom()` para montar a planta exata.
 - **Documente o comportamento atual, não o desejado.** Se algo está errado, o teste registra o
   que o produto faz e o achado entra em `docs/ui/ACHADOS.md`. Teste que falha de propósito vira
   ruído e some do radar.

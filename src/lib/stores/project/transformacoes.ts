@@ -147,6 +147,15 @@ export function rotateRoom90(roomId: string): boolean {
       }
     }
   }, `Rotated ${room.name}`);
+
+  // Girar troca largura por comprimento: a área ocupada muda de forma e pode invadir um
+  // ambiente que não compartilha parede — o reflow acima só alcança os conectados. Sem
+  // esta resolução final, o ambiente ficava por cima do outro até o usuário clicar nele
+  // de novo, porque só o mouseup chamava `resolveRoomOverlap`.
+  //
+  // Não gera entrada de histórico própria: `resolveRoomOverlap` escreve sem snapshot, então
+  // um único desfazer reverte a rotação inteira, reacomodação incluída.
+  resolveRoomOverlap(roomId);
   return true;
 }
 

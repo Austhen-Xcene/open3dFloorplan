@@ -80,6 +80,24 @@ sem depender da seleção múltipla.
 Restam as **categorias do catálogo** (`Living Room`, `Electrical`, `Plumbing`), que saem direto de
 `furnitureCatalog.ts` — ver `CLAUDE.md` §6, item 2.
 
+### 8. Girar um ambiente podia deixá-lo por cima de outro
+**Origem:** pré-existente · **Gravidade:** alta (planta fica inconsistente) · **Relatado pelo usuário**
+
+Girar troca largura por comprimento, então a área ocupada muda de forma e pode invadir um
+vizinho. `rotateRoom90` reacomoda os ambientes **conectados** (que compartilham parede), mas não
+tinha resolução final de sobreposição — um ambiente solto, sem parede em comum, era atropelado.
+
+Por isso o sintoma era intermitente: com vizinhos adjacentes o reflow resolvia; com um ambiente
+solto, não. E clicar no ambiente de novo consertava, porque só o `mouseup` chamava
+`resolveRoomOverlap`.
+
+**Correção:** `rotateRoom90` chama `resolveRoomOverlap` ao final. Como essa função escreve sem
+snapshot, um único desfazer continua revertendo a rotação inteira, reacomodação incluída.
+**Teste:** `09-rotacao.spec.ts` → "girar contra vizinho NÃO adjacente também se reacomoda".
+
+Este caso não aparecia com a inserção pelo formulário — o posicionamento automático depende de
+nomes e ordem. O teste usa `abrirEditorCom()`, que semeia o projeto com geometria exata.
+
 ## Abertos
 
 Nenhum.
