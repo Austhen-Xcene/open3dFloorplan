@@ -4,12 +4,9 @@ Editor **2D** de plantas onde o usuário monta o projeto da própria casa e dist
 os **equipamentos de automação do Studio SHC** dentro de cada ambiente — enxergando em qual
 equipamento e em qual saída cada carga está ligada.
 
-Roda de duas formas, com **a mesma base de código**:
-
-- **Embarcado** — WebView dentro do app Studio SHC (Flutter / `flutter_inappwebview`)
-- **Standalone** — site com URL própria
-
-A diferença entre os modos é decidida em tempo de execução; não há build separado.
+É um **site independente**, aberto no navegador: sem backend, sem API e sem vínculo em tempo de
+execução com o app Studio SHC. O catálogo de equipamentos é mantido neste repositório, e o
+projeto do usuário fica salvo no próprio navegador, podendo ser exportado e importado.
 
 ## Funcionalidades
 

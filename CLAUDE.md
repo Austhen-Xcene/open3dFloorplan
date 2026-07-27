@@ -4,19 +4,25 @@ Contexto do projeto para o Claude Code. Leia antes de qualquer alteração.
 
 ## 1. O que é este projeto
 
-Editor **2D** de plantas de casa onde o usuário distribui visualmente os **equipamentos de
-automação do Studio SHC** dentro de cada ambiente, e enxerga **em qual equipamento / qual saída**
-cada carga está ligada.
+**Site independente** onde o usuário monta a planta 2D da própria casa, distribui visualmente os
+**equipamentos de automação do Studio SHC** dentro de cada ambiente, e enxerga **em qual
+equipamento e em qual saída** cada carga está ligada.
 
-O produto roda de **duas formas, com a mesma base de código**:
+### O que este projeto NÃO é
 
-| Modo | Como roda | Observação |
-|---|---|---|
-| **Embarcado** | WebView dentro do app **Studio SHC** (Flutter, `flutter_inappwebview`) | Contexto (usuário, projeto, equipamentos) chega pela URL/sessão |
-| **Standalone** | Site próprio, URL pública | Mesmo app, mesma API REST, login próprio |
+Estas linhas existem porque a premissa já mudou uma vez. Não reintroduza nada disto sem o
+usuário pedir explicitamente:
 
-Não existe fork, não existe build separado. A diferença entre os modos é **runtime**
-(`modoIncorporado`), nunca compile-time.
+- ❌ **Não conversa com o Studio SHC.** Sem API, sem backend, sem autenticação, sem sincronizar
+  a tabela de entradas e saídas do app. O site é desvinculado.
+- ❌ **Não roda dentro de webview.** Sem Flutter, sem ponte JS, sem modo embarcado, sem
+  `modoIncorporado`. É um site aberto no navegador, e só.
+- ❌ **Não busca o catálogo de lugar nenhum.** Os equipamentos são uma tabela **mantida no
+  repositório**, atualizada por commit.
+
+Consequência prática: tudo é client-side. O projeto do usuário vive no `localStorage` e sai por
+exportação (JSON, PNG, SVG, PDF, DXF, DWG). `services/datastore.ts` continua sendo a interface
+de persistência, mas com uma implementação só — `localStore`.
 
 ### Origem
 
@@ -31,8 +37,9 @@ equipamentos SHC. Ver §7.
    junto com o catálogo de móveis.
 2. **Zoom, pan, minimapa e snap são funcionalidades centrais** — o usuário precisa deles para
    achar um equipamento na planta. Não degradar em nome de simplificação.
-3. **O mesmo código atende os dois modos.** Nada de `if (webview) { … }` espalhado: a diferença
-   fica isolada nos adaptadores (§6).
+3. **Tudo roda no navegador.** Sem servidor de dados, sem API, sem sessão. Se uma tarefa parece
+   pedir backend, o caminho certo é resolver no cliente ou perguntar ao usuário — não inventar
+   um endpoint.
 4. **Compatibilidade de dados.** Projetos já salvos no `localStorage` precisam continuar
    abrindo. Toda mudança de tipo exige migração — ver a skill `modelo-de-dados`.
 5. **Português em tudo que for novo.** Identificadores, tipos, comentários, UI e docs em PT-BR.
@@ -145,7 +152,7 @@ src/lib/
     saveStatus.ts, versionHistory.ts, theme.ts, onboarding.svelte.ts
 
   services/
-    datastore.ts           # interface DataStore + localStore  ← SEAM DA API DO STUDIO SHC
+    datastore.ts           # interface DataStore + localStore (localStorage, única impl.)
     arquivoProjeto.ts      # importar / compartilhar projeto em arquivo
 
   utils/                   # SÓ funções puras — não importam store nem service
@@ -218,12 +225,16 @@ Toda mutação passa por `mutate(fn, descrição, coalesceKey?)`, que aplica a f
   propriedade: passe `coalesceKey` para não gerar uma entrada de undo por tecla.
 - Agrupar várias mutações em um undo: `beginUndoGroup()` / `endUndoGroup(descrição)`.
 
-### Persistência (hoje)
+### Persistência
 
-`services/datastore.ts` define a interface `DataStore` (`save`/`load`/`list`/`delete`/`duplicate`/
-thumbnails) com uma única implementação: `localStore` (localStorage).
+Tudo no navegador. `services/datastore.ts` define a interface `DataStore`
+(`save`/`load`/`list`/`delete`/`duplicate`/thumbnails), com uma implementação: `localStore`
+(localStorage). Não há outra e não está previsto haver.
 
 Chaves: `floorplan_projects`, `floorplan_thumb_<id>`, `o3d_settings`.
+
+O `localStorage` tem cota (poucos MB) — `localStore.save()` já trata `QuotaExceededError`. É por
+isso que a exportação em JSON não é conveniência, é a saída de emergência do usuário.
 
 `localStore.load()` já faz migração defensiva (preenche arrays ausentes em `Floor`). **Mantenha
 esse ponto como o lugar da migração de esquema.**
@@ -243,36 +254,44 @@ neste repo.
 - Tailwind direto no markup; sem CSS global novo (`src/app.css` só tem reset/scrollbar/tema).
 - Mensagens de commit: `feat:` / `fix:` / `ux:` / `docs:` — como no histórico.
 
-## 6. Integração com o Studio SHC
+## 6. Entradas, saídas e ligações
 
-Contrato completo e passo a passo: **skill `integracao-studio-shc`**. Resumo:
+É o diferencial do produto e vive **inteiro dentro deste projeto** — não há nada para sincronizar
+com o Studio SHC.
 
-- Transporte único nos dois modos: **API REST do Studio SHC**. O WebView Flutter serve para
-  passar contexto/sessão e para abrir/fechar o fluxo, **não** para trafegar os dados do projeto.
-- `DataStore` é o ponto de extensão: entra um `shcStore` ao lado do `localStore`, escolhido em
-  runtime. `localStore` permanece como cache offline e como modo anônimo do site.
-- Toda inclusão/remoção/religação de equipamento na planta precisa refletir na **tabela de
-  entradas e saídas** do Studio SHC — esse é o requisito de negócio principal, não um extra.
-- ⚠️ **Nada disso está implementado ainda.** O que existe hoje é só `localStore`. A skill descreve
-  o alvo; não presuma que já existe código de bridge ou de API no repo.
+Cada equipamento do catálogo declara quantas **entradas** e quantas **saídas** tem. O projeto do
+usuário guarda as **ligações**: qual carga (ponto de luz, tomada, motor…) está ligada em qual
+saída de qual equipamento.
+
+O que o usuário precisa conseguir fazer:
+
+- posicionar o equipamento no ambiente onde ele fisicamente fica;
+- ligar uma carga a uma saída livre e ver isso representado na planta;
+- selecionar um equipamento e enxergar tudo que depende dele;
+- selecionar uma carga e enxergar de onde ela vem;
+- saber quantas saídas ainda estão livres em cada equipamento.
+
+Regras que decorrem disso:
+
+- A ligação é dado do **projeto**, não do catálogo — mora no `Floor`, junto com os elementos.
+- Toda alteração de ligação passa por `mutate` como qualquer outra (undo/redo funciona).
+- Uma saída não pode receber duas cargas; a validação é responsabilidade da store, não da UI.
+- Apagar um equipamento tem que soltar as ligações dele — senão sobra referência órfã que some
+  silenciosamente no desenho.
 
 ## 7. Evolução planejada (ordem sugerida)
 
 1. **Modelo de equipamento** — novo tipo `EquipamentoSHC` (id, categoria, símbolo, nº de entradas
    e saídas, tensão/carga) e `EquipamentoInstalado` no `Floor`, substituindo `FurnitureItem`.
-2. **Catálogo** — trocar `utils/furnitureCatalog.ts` pelo catálogo SHC. A seção `Electrical` /
-   `Plumbing` do catálogo atual (itens com `symbol: true`) é o modelo mais próximo do alvo.
-3. **Símbolos 2D** — desenhar cada equipamento em `furnitureIcons.ts` (padrão de símbolo elétrico,
+2. **Catálogo** — trocar `utils/furnitureCatalog.ts` pelo catálogo SHC, mantido no repositório.
+   A seção `Electrical` / `Plumbing` do catálogo atual (itens com `symbol: true`) é o modelo mais
+   próximo do alvo. Divida por domínio (`catalogo/modulos.ts`, `catalogo/sensores.ts`, …) com um
+   `index.ts` que agrega — a tabela inteira estoura o limite de linhas rapidinho.
+3. **Símbolos 2D** — desenhar cada equipamento em `utils/icones/` (padrão de símbolo elétrico,
    não desenho de móvel).
-4. **Ligações** — representar visualmente *carga → saída → equipamento*, com destaque ao
-   selecionar. Requer estrutura de ligação nos tipos e desenho de conexão no renderer.
-5. **Modo dual + API** — `shcStore`, detecção de `modoIncorporado`, sincronização de
-   entradas/saídas.
-6. **Limpeza final** — remover o catálogo de móveis quando o de equipamentos estiver completo.
-
-Aberto (decidir depois): se o usuário vê **só os equipamentos que possui** no Studio SHC ou
-**todo o catálogo** com marcação de posse. Projete o catálogo com um campo de disponibilidade
-para não travar essa decisão.
+4. **Ligações** — estrutura de ligação nos tipos, validação na store e desenho da conexão
+   *carga → saída → equipamento* no renderizador, com destaque ao selecionar.
+5. **Limpeza final** — remover o catálogo de móveis quando o de equipamentos estiver completo.
 
 ## 8. Dívida técnica
 
@@ -319,9 +338,10 @@ para não travar essa decisão.
 - **Sem testes automatizados.** Validação é `npm run check` + verificação manual. Ao criar a
   primeira suíte, comece pelas funções puras de `utils/` — são as mais fáceis, as mais críticas,
   e são o que falta para tornar o passo acima seguro.
-- `src/lib/firebase.ts` expõe a config pública do Firebase no cliente. É aceitável para Analytics;
-  **não** é precedente para credencial de API do Studio SHC.
-- Tudo em §7 ainda por fazer (catálogo de equipamentos, ligações, integração SHC).
+- `src/lib/firebase.ts` só carrega o Analytics (importado sob demanda em `+layout.svelte`). O
+  Firebase aqui é **destino de deploy** (App Hosting), não backend de dados — não confunda os
+  dois nem o use como porta de entrada para armazenar projeto fora do navegador.
+- Tudo em §7 ainda por fazer (modelo de equipamento, catálogo, símbolos 2D, ligações).
 
 ## 9. Branches
 

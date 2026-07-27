@@ -78,15 +78,14 @@ Ao exibir medida, use `formatLength`/`formatLengthPrecise` de `stores/settings.t
 ### 4. Entradas e saídas
 
 É o diferencial do produto: o usuário precisa ver **em qual equipamento e em qual saída** cada
-carga está ligada.
+carga está ligada. Detalhes na skill `ligacoes-entradas-saidas`.
 
-Ao criar/alterar um equipamento, garanta que:
-- a contagem de `entradas`/`saidas` do catálogo bata com o que o Studio SHC expõe para aquele
-  modelo;
-- a ligação seja um dado do projeto (não do catálogo): guarde no elemento instalado, algo como
-  `{ equipamentoId, saida: number }` na carga;
-- alterar a ligação passe pela mesma função de mutação (undo funciona);
-- a alteração seja propagada ao Studio SHC — ver skill `integracao-studio-shc`.
+Do lado do catálogo, ao criar/alterar um equipamento garanta que:
+- a contagem de `entradas`/`saidas` bata com o modelo real do produto — é essa contagem que
+  limita quantas cargas cabem;
+- **reduzir** a contagem de um equipamento já publicado é mudança de compatibilidade: projetos
+  salvos podem ter ligações em saídas que deixaram de existir. Trate na migração
+  (skill `modelo-de-dados`), não só no catálogo.
 
 ### 5. Exportação
 

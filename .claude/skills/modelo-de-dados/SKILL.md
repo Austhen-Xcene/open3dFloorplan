@@ -19,8 +19,9 @@ Project { id, name, floors[], activeFloorId, createdAt, updatedAt }
 
 ## Regra nº 1: compatibilidade
 
-Projetos vivem no `localStorage` do usuário (chave `floorplan_projects`) e vão viver na API do
-Studio SHC. **Todo projeto já salvo precisa continuar abrindo.**
+Projetos vivem no `localStorage` do navegador do usuário (chave `floorplan_projects`) e em
+arquivos JSON que ele exportou. Não há servidor: se a migração quebrar, o trabalho dele
+**sumiu de vez**. **Todo projeto já salvo precisa continuar abrindo.**
 
 Ponto único de migração: `localStore.load()` em `src/lib/services/datastore.ts` — ele já preenche
 arrays ausentes em `Floor`. Estenda ali, não espalhe `?? []` pelo código.
