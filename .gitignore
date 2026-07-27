@@ -12,8 +12,9 @@ node_modules
 .DS_Store
 Thumbs.db
 
-# Claude Code (personal)
-.claude/
+# Claude Code (pessoal — as skills e o CLAUDE.md são versionados)
+.claude/settings.local.json
+.claude/*.local.json
 .vscode/
 
 # Env
