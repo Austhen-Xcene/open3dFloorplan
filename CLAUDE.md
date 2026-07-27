@@ -314,26 +314,36 @@ Regras que decorrem disso:
 
 ### Aberta
 
-- ⚠️ **`FloorPlanCanvas.svelte` ainda tem 3411 linhas** — o único arquivo acima do limite.
+- ⚠️ **`FloorPlanCanvas.svelte` tem 3306 linhas** — o único arquivo acima do limite.
+
   Já saíram dele: markup → `editor/canvas/*`, réguas → `renderizador/reguas.ts`, encaixe em
   parede → `utils/encaixeParede.ts`, reconciliação de ambientes →
-  `utils/reconciliarAmbientes.ts`, menu de contexto → `editor/canvas/acoesMenuContexto.ts`.
+  `utils/reconciliarAmbientes.ts`, menu de contexto → `editor/canvas/acoesMenuContexto.ts`,
+  e **as ~105 variáveis de estado → `editor/canvas/estadoCanvas.svelte.ts`** (instância `ui`).
 
-  O que sobrou é **uma máquina de estados de interação**: `draw()` (~620 linhas),
-  `onMouseDown` (~400), `onMouseMove` (~270), `onKeyDown` (~250) e ~60 variáveis `$state`
-  que todos compartilham. Não dá para fatiar por recorte de texto sem quebrar reatividade.
+  **Etapas 1 e 2 do plano: FEITAS.** O estado já está numa classe com runes, o que é a
+  pré-condição para tudo o mais — funções fora do componente conseguem receber `ui` em vez de
+  fechar sobre variáveis do escopo.
 
-  **Plano para o próximo passo** (nesta ordem, um por commit, `npm run check` + teste manual
-  a cada etapa):
-  1. Criar `editor/canvas/estadoCanvas.svelte.ts` com uma classe de runes agrupando as ~60
-     variáveis por assunto (câmera, arrasto, seleção, ferramentas, medição).
-  2. Trocar as variáveis soltas do componente por essa instância — **só troca de referência,
-     zero mudança de lógica**.
-  3. Extrair `draw()` para `renderizador/quadro.ts`, recebendo a instância + o `Floor`.
-  4. Extrair cada handler (`onMouseDown`, `onMouseMove`, `onMouseUp`, `onKeyDown`) para
-     `editor/canvas/interacao/*.ts`, recebendo a mesma instância.
+  **Etapas 3 e 4, pendentes:**
 
-  Não faça os quatro de uma vez. Sem testes, cada etapa precisa ser exercitada no navegador.
+  3. Extrair o bloco de desenho para `editor/canvas/desenho/`. A fronteira já está medida:
+     37 funções, **8 dependências entrando** (`markDirty`, `getCS`, `getMultiSelectBBox`,
+     `snapFurnitureToWall`, `worldToScreen`, `snapWallEndPoint`, `typedWallLengthCm`,
+     `applyTypedWallLength`) e **5 saindo** (`wallPointAt`, `hitTestMeasurement`,
+     `hitTestAnnotation`, `hitTestTextAnnotation`, `getWorldBBox`). Use uma fábrica
+     `criarDesenho(ui, deps)` para deixar esse acoplamento visível.
+
+     `draw()` sozinho tem 626 linhas e precisa virar fases — os cortes naturais já existem no
+     código: fundo/estrutura, cotas de objeto, elementos secundários, parede em progresso,
+     seleção e anotações, sobreposições fixas (réguas e minimapa).
+
+  4. Extrair os tratadores (`onMouseDown` ~400, `onMouseMove` ~270, `onKeyDown` ~252,
+     `onMouseUp` ~135) para `editor/canvas/interacao/*.ts`, recebendo `ui`.
+
+  **Não faça as duas de uma vez, e não comece sem o editor testado no navegador.** Sem suíte
+  de testes, empilhar reestruturação sobre mudança não verificada transforma um bug de uma
+  linha numa caça de horas.
 
 - **Sem testes automatizados.** Validação é `npm run check` + verificação manual. Ao criar a
   primeira suíte, comece pelas funções puras de `utils/` — são as mais fáceis, as mais críticas,
