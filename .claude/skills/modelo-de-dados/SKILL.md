@@ -1,6 +1,6 @@
 ---
 name: modelo-de-dados
-description: Alterar os tipos do projeto (Project, Floor, Wall, Room, FurnitureItem, equipamentos, ligações) ou o estado em stores/project.ts, com migração dos projetos já salvos e undo/redo correto. Use quando a tarefa envolver models/types.ts, novo campo, novo tipo de elemento, renomear propriedade, migração, compatibilidade, undo, redo ou histórico.
+description: Alterar os tipos do projeto (Project, Floor, Wall, Room, FurnitureItem) ou o estado em stores/project/, com undo/redo correto e compatibilidade dos projetos salvos. Use quando a tarefa envolver models/types.ts, novo campo, novo tipo de elemento, renomear propriedade, migração, compatibilidade, undo, redo ou histórico.
 ---
 
 # Modelo de dados e mutações
@@ -17,14 +17,17 @@ Project { id, name, floors[], activeFloorId, createdAt, updatedAt }
 
 `src/lib/models/types.ts` é o arquivo único de tipos. Medidas em **cm**, ângulos em **graus**.
 
-## Regra nº 1: compatibilidade
+## Regra nº 1: compatibilidade — depende de já existir dado real
 
-Projetos vivem no `localStorage` do navegador do usuário (chave `floorplan_projects`) e em
-arquivos JSON que ele exportou. Não há servidor: se a migração quebrar, o trabalho dele
-**sumiu de vez**. **Todo projeto já salvo precisa continuar abrindo.**
+**Hoje não existe.** O site não foi publicado, não há contas, e o que está no `localStorage` é
+teste do próprio autor. Mudar o esquema é barato: mude o tipo e siga. Não gaste esforço
+preservando dado de teste.
+
+**Isso inverte no dia em que o Firebase entrar e houver conta de gente de verdade.** A partir
+daí, todo projeto salvo precisa continuar abrindo, e quebrar o esquema é perder trabalho alheio.
 
 Ponto único de migração: `localStore.load()` em `src/lib/services/datastore.ts` — ele já preenche
-arrays ausentes em `Floor`. Estenda ali, não espalhe `?? []` pelo código.
+arrays ausentes em `Floor`. Quando a regra virar, estenda ali; não espalhe `?? []` pelo código.
 
 | Mudança | O que fazer |
 |---|---|
@@ -34,15 +37,17 @@ arrays ausentes em `Floor`. Estenda ali, não espalhe `?? []` pelo código.
 | Renomear `catalogId` de item | Mapa de alias em `load()` — senão o item **some sem aviso** (`drawFurnitureItem` faz `if (!cat) return;`) |
 | Remover campo | Ignorar na leitura; não jogar erro |
 
-Ao introduzir migração não trivial, adicione um campo de versão de esquema ao `Project` e migre
-por versão — é mais barato agora que na terceira migração implícita.
+Quando a regra virar e a primeira migração não trivial aparecer, adicione um campo de versão de
+esquema ao `Project` e migre por versão — é mais barato do que descobrir isso na terceira
+migração implícita.
 
 Exportação JSON (`exportAsJSON`) e importação usam o mesmo formato: um arquivo exportado ontem
 tem que importar hoje.
 
 ## Regra nº 2: toda mutação passa por `mutate`
 
-`src/lib/stores/project.ts` (1300 linhas) concentra estado **e** mutações.
+`src/lib/stores/project/` concentra estado **e** mutações, um módulo por agregado.
+`historico.ts` é o caminho obrigatório de escrita.
 
 ```ts
 mutate(fn: (floor: Floor) => void, descrição?: string, coalesceKey?: string)
@@ -50,8 +55,8 @@ mutate(fn: (floor: Floor) => void, descrição?: string, coalesceKey?: string)
 
 Aplica `fn` sobre o `Floor` ativo e tira snapshot para o histórico.
 
-- **Nunca** faça `currentProject.update(...)` fora de `project.ts`. Componentes chamam funções
-  exportadas (`addFurniture`, `updateWall`, `moveColumn`, …).
+- **Nunca** faça `currentProject.update(...)` fora de `stores/project/`. Componentes chamam
+  funções exportadas (`addFurniture`, `updateWall`, `moveColumn`, …).
 - Ao criar um tipo novo de elemento, exporte o trio `adicionar` / `atualizar` / `remover` no mesmo
   padrão das existentes, e inclua o novo array em `createDefaultFloor()`.
 - `removeElement(id)` faz a remoção genérica por id — inclua o novo array nele também.
@@ -76,20 +81,19 @@ Ao adicionar um tipo de elemento ao `Floor`, verifique a lista inteira:
 
 ```
 [ ] nenhum arquivo tocado passou de 400 linhas (skill `refatorar-arquivo-grande`)
-[ ] types.ts — interface
-[ ] project.ts — createDefaultFloor() inclui o array
-[ ] project.ts — adicionar / atualizar / remover
-[ ] project.ts — removeElement() reconhece o id
-[ ] datastore.ts load() — migração preenche o array em projetos antigos
-[ ] canvasRenderer.ts — função de desenho
-[ ] FloorPlanCanvas.svelte — chamada no frame, na posição certa da ordem de desenho
-[ ] hitTesting.ts — função findXxxAt
-[ ] PropertiesPanel.svelte — edição
-[ ] LayersPanel.svelte — visibilidade/listagem
-[ ] export.ts — PNG, SVG, PDF, JSON
-[ ] cadExport.ts — DXF, DWG
-[ ] PrintLayout.svelte — impressão
-[ ] npm run check passa
+[ ] models/types.ts — interface
+[ ] stores/project/estado.ts — createDefaultFloor() inclui o array
+[ ] stores/project/<agregado>.ts — adicionar / atualizar / remover
+[ ] stores/project/elementos.ts — removeElement() reconhece o id
+[ ] utils/renderizador/ — módulo de desenho da família
+[ ] editor/canvas/desenho/quadro.ts — chamada na fase certa (a ordem é o contrato)
+[ ] utils/hitTesting.ts — função findXxxAt
+[ ] sidebar/propriedades/ — painel de edição do tipo novo
+[ ] sidebar/LayersPanel.svelte — visibilidade/listagem
+[ ] utils/exportacao/ — PNG, SVG, PDF, JSON
+[ ] utils/cadExport.ts — DXF, DWG
+[ ] editor/PrintLayout.svelte — impressão
+[ ] npm run check e npm test passam
 ```
 
 SVG, PDF, DXF e DWG têm desenho **próprio**, independente do canvas. É o item mais esquecido
@@ -97,6 +101,9 @@ neste repo: o elemento aparece na tela e não sai no arquivo exportado.
 
 ## Stores: clássicas, não runes
 
-`stores/project.ts` e `stores/settings.ts` usam `writable`/`derived` do Svelte. Runes (`$state`,
-`$derived`, `$props`) são usadas **dentro dos componentes**. Não converta store para runes nem
-misture os dois modelos no mesmo arquivo.
+`stores/project/` e `stores/settings.ts` usam `writable`/`derived` do Svelte. Runes (`$state`,
+`$derived`, `$props`) são usadas **dentro dos componentes** e em `canvas/estadoCanvas.svelte.ts`.
+Não converta store para runes nem misture os dois modelos no mesmo arquivo.
+
+`EstadoCanvas` é a exceção que confirma a regra: é estado de **interface** (o que está sendo
+arrastado, o zoom, qual camada está visível), não dado do projeto. Nada dali é persistido.

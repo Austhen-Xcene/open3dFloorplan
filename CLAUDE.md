@@ -36,8 +36,10 @@ removido; o que ficou é o editor 2D, traduzido para PT-BR e reorganizado.
 3. **O backend é o Firebase deste projeto, e nada além dele.** Enquanto ele não existir, tudo
    roda no navegador. Se uma tarefa parece pedir outro servidor ou outra API, o caminho certo é
    perguntar ao usuário — não inventar um endpoint.
-4. **Compatibilidade de dados.** Projetos já salvos no `localStorage` precisam continuar
-   abrindo. Toda mudança de tipo exige migração — ver a skill `modelo-de-dados`.
+4. **Compatibilidade de dados — só a partir do Firebase.** Enquanto o site não foi publicado e
+   os únicos dados são testes do autor no navegador, quebrar o esquema é barato: mude o tipo e
+   siga. **Depois que houver conta e dado real, a regra inverte** e toda mudança de tipo exige
+   migração — ver a skill `modelo-de-dados`.
 5. **Português em tudo que for novo.** Identificadores, tipos, comentários, UI e docs em PT-BR.
    O código legado está em inglês; traduza ao tocar no arquivo, não em varreduras separadas.
 6. **Máximo de 300–400 linhas por arquivo.** Ver §2.1. Não é meta, é limite.
@@ -295,9 +297,10 @@ Quando existir, na ordem:
    A escolha entre os dois é de runtime: sem usuário logado, `localStore`.
 3. **Regras de Segurança do Firestore** — quem protege os dados são elas, não o segredo da
    `apiKey`, que é pública por natureza. Projeto só acessível pelo dono.
-4. **Migração** — ao entrar pela primeira vez, subir os projetos que já estão no `localStorage`
-   daquele navegador. Sem isso o usuário "perde" o que tinha.
-5. **Modo offline** — `localStore` continua útil como cache e para uso sem conta.
+4. **Modo offline** — `localStore` continua útil como cache e para uso sem conta.
+
+**Não vai haver migração do localStorage para o Firebase.** O site nunca foi publicado e não
+tem usuários: o que existe em navegador é dado de teste do próprio autor. Começa do zero.
 
 ### Técnico, sem bloqueio
 
