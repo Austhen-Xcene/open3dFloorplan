@@ -176,8 +176,13 @@ src/lib/
 
   components/
     editor/
-      FloorPlanCanvas.svelte  # 3411 linhas — VER §8, ainda acima do limite
-      canvas/                 #   overlays e ações extraídas do canvas
+      FloorPlanCanvas.svelte  # montagem e fiação — a lógica mora em canvas/
+      canvas/
+        estadoCanvas.svelte.ts  #   ~105 campos de estado de interface, agrupados
+        nucleo.ts               #   coordenadas, encaixe, caixas — quebra o ciclo abaixo
+        desenho/                #   o quadro, em 6 fases nomeadas
+        interacao/              #   um módulo por gesto: mouse, toque, teclado, drop
+        *.svelte                #   sobrepostos: barra de status, camadas, dicas, zoom
     sidebar/
       BuildPanel.svelte + build/       # abas: aberturas, ambientes, objetos
       PropertiesPanel.svelte + propriedades/  # um painel por tipo de elemento
@@ -187,8 +192,20 @@ src/lib/
 
 ### Pipeline do canvas
 
-`FloorPlanCanvas.svelte` é o único dono do `<canvas>`. Ele monta um `CanvasState`
-(`{ ctx, width, height, zoom, camX, camY }`) e delega:
+`FloorPlanCanvas.svelte` monta o `<canvas>` e faz a fiação, nada mais. A ordem de construção é
+o contrato:
+
+```
+const ui = new EstadoCanvas();          // estado de interface (~105 campos)
+const n  = criarNucleo(ui);             // coordenadas, encaixe, caixas de seleção
+const d  = criarDesenho(ui, n);         // o quadro, em 6 fases
+const acoes = criarInteracao(ui, n, d); // mouse, toque, teclado, drop, menu
+```
+
+O núcleo existe para que **desenho e interação não dependam um do outro** — os dois precisam de
+`screenToWorld`, `snap` e das caixas, e sem ele haveria ciclo.
+
+O desenho monta um `CanvasState` (`{ ctx, width, height, zoom, camX, camY }`) e delega:
 
 - **desenhar** → `utils/renderizador/` — um módulo por família: `paredes`, `portas`, `janelas`,
   `equipamentos`, `estruturas`, `ambientes`, `anotacoes`, `grade`, `reguas`, `minimapa`,
@@ -206,8 +223,9 @@ src/lib/
 Regra: tudo em `utils/` é **função pura**. Não importa store, não muta estado. Lógica nova de
 desenho ou de clique vai lá, não inline no componente.
 
-A **ordem de desenho** continua sendo responsabilidade do `FloorPlanCanvas`, não dos módulos —
-mudar a posição de uma chamada no frame muda o que fica coberto pelo quê.
+A **ordem das fases** é responsabilidade de `desenho/quadro.ts`: fundo → estrutura → cotas →
+elementos → parede em progresso → seleção → réguas e minimapa. Trocar a ordem muda o que fica
+coberto pelo quê; réguas e minimapa vêm por último de propósito.
 
 ### Coordenadas e unidades
 
@@ -320,37 +338,6 @@ Regras que decorrem disso:
   subcomponentes · `roomPresets` 421 → `ambientes/` (maior: 183) · `editor/+page` 321 → 116.
 
 ### Aberta
-
-- ⚠️ **`FloorPlanCanvas.svelte` tem 3306 linhas** — o único arquivo acima do limite.
-
-  Já saíram dele: markup → `editor/canvas/*`, réguas → `renderizador/reguas.ts`, encaixe em
-  parede → `utils/encaixeParede.ts`, reconciliação de ambientes →
-  `utils/reconciliarAmbientes.ts`, menu de contexto → `editor/canvas/acoesMenuContexto.ts`,
-  e **as ~105 variáveis de estado → `editor/canvas/estadoCanvas.svelte.ts`** (instância `ui`).
-
-  **Etapas 1 e 2 do plano: FEITAS.** O estado já está numa classe com runes, o que é a
-  pré-condição para tudo o mais — funções fora do componente conseguem receber `ui` em vez de
-  fechar sobre variáveis do escopo.
-
-  **Etapas 3 e 4, pendentes:**
-
-  3. Extrair o bloco de desenho para `editor/canvas/desenho/`. A fronteira já está medida:
-     37 funções, **8 dependências entrando** (`markDirty`, `getCS`, `getMultiSelectBBox`,
-     `snapFurnitureToWall`, `worldToScreen`, `snapWallEndPoint`, `typedWallLengthCm`,
-     `applyTypedWallLength`) e **5 saindo** (`wallPointAt`, `hitTestMeasurement`,
-     `hitTestAnnotation`, `hitTestTextAnnotation`, `getWorldBBox`). Use uma fábrica
-     `criarDesenho(ui, deps)` para deixar esse acoplamento visível.
-
-     `draw()` sozinho tem 626 linhas e precisa virar fases — os cortes naturais já existem no
-     código: fundo/estrutura, cotas de objeto, elementos secundários, parede em progresso,
-     seleção e anotações, sobreposições fixas (réguas e minimapa).
-
-  4. Extrair os tratadores (`onMouseDown` ~400, `onMouseMove` ~270, `onKeyDown` ~252,
-     `onMouseUp` ~135) para `editor/canvas/interacao/*.ts`, recebendo `ui`.
-
-  **Uma etapa por commit, rodando `npm test` entre elas.** A suíte de interface é a rede de
-  segurança que faltava — sem rodá-la, empilhar reestruturação transforma um bug de uma linha
-  numa caça de horas.
 
 - **Sem testes unitários.** Existe suíte de interface (Playwright, 56 testes), mas as funções
   puras de `utils/` — geometria de parede, detecção de ambiente, encaixe, reconciliação — não têm
