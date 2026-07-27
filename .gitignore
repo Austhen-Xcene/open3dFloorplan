@@ -31,3 +31,6 @@ vite.config.ts.timestamp-*
 tests/.saida/
 /test-results/
 /playwright-report/
+
+# Capturas geradas pelos testes — regeneradas com `npm test`
+docs/ui/_evidencias/

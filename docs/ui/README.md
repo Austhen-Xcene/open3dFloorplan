@@ -8,9 +8,13 @@ As capturas **não são feitas à mão**: saem da suíte Playwright em `tests/e2
 regenera todas. Isso é proposital — documentação que não é gerada do produto envelhece calada.
 
 ```bash
-npx playwright test          # roda tudo e regenera as evidências
+npm test                     # roda tudo e regenera as evidências
 npx playwright test -g grade # roda só o que casa com "grade"
 ```
+
+> **`_evidencias/` não é versionado.** São 6,5 MB de PNG que mudariam a cada ajuste de pixel e
+> poluiriam o histórico. Se as imagens deste documento aparecerem quebradas, rode `npm test` —
+> elas se recriam em segundos. O que vale como documentação é o texto; a captura é ilustração.
 
 ## Áreas
 

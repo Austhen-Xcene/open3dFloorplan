@@ -122,8 +122,10 @@ de reatividade, prop não repassada e desenho que parou de acontecer — coisas 
 enxerga. A suíte já pegou cinco bugs reais, um deles regressão de refatoração
 (`docs/ui/ACHADOS.md`).
 
-Os testes vivem em `tests/e2e/` e geram as capturas de `docs/ui/_evidencias/`, que são a
+Os testes vivem em `tests/e2e/` e geram as capturas de `docs/ui/_evidencias/`, que ilustram a
 documentação de interface. Ao mexer na UI, rode `npm test` — as evidências se atualizam sozinhas.
+Elas **não são versionadas**: são geradas, e binário que muda a cada ajuste de pixel não pertence
+ao histórico.
 
 Deploy: Firebase App Hosting (`apphosting.yaml`), `@sveltejs/adapter-node`. ⚠️ o projeto
 configurado ainda é o `openplan3d`, herdado do fork — trocar ao criar o projeto próprio.
@@ -366,7 +368,8 @@ espelhando `docs/ui/`.
   que o produto faz e o achado entra em `docs/ui/ACHADOS.md`. Teste que falha de propósito vira
   ruído e some do radar.
 - **Toda captura sai de teste.** `evidenciar(alvo, area, parametro)` grava em
-  `docs/ui/_evidencias/<area>/<parametro>.png`. Captura feita à mão envelhece calada.
+  `docs/ui/_evidencias/<area>/<parametro>.png` — pasta ignorada pelo git, recriada por `npm test`.
+  Captura feita à mão envelhece calada.
 
 ### Ao corrigir um bug
 
