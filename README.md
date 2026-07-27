@@ -3,9 +3,12 @@
 Editor **2D** onde o usuário monta a planta da própria casa: cria ambientes com medidas exatas,
 posiciona portas, janelas e objetos, e exporta o resultado.
 
-É um **site independente**, aberto no navegador: sem backend e sem API. O catálogo é mantido
-neste repositório, e o projeto do usuário fica salvo no próprio navegador, podendo ser exportado
-e importado.
+Cada pessoa cria a própria conta e vê só os projetos dela. Sem compartilhamento e sem vínculo
+com nenhum outro sistema.
+
+**Persistência:** hoje os projetos ficam no `localStorage` do navegador. O destino é o Firebase
+(conta e banco), que ainda vai ser criado — enquanto isso, exporte em JSON para não depender só
+do navegador.
 
 ## Funcionalidades
 
@@ -69,6 +72,12 @@ npm run preview
 - Tailwind CSS v4
 - Canvas 2D nativo (sem WebGL — o editor é 2D por decisão de produto)
 - jsPDF, dxf-writer
+
+## Firebase
+
+`src/lib/firebase.ts` lê a configuração de variáveis `PUBLIC_FIREBASE_*` e fica inerte sem elas —
+o app funciona normalmente, salvando no navegador. Ao criar o projeto, copie `.env.example` para
+`.env` e preencha.
 
 ## Convenções
 

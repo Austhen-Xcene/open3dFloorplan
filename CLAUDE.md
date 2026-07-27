@@ -4,31 +4,27 @@ Contexto do projeto para o Claude Code. Leia antes de qualquer alteração.
 
 ## 1. O que é este projeto
 
-**Site independente** onde o usuário monta a planta 2D da própria casa: cria ambientes com
-medidas exatas, posiciona portas, janelas e objetos, e exporta o resultado.
+**Site próprio** onde a pessoa cria uma conta, monta os projetos da própria casa em planta 2D —
+ambientes com medidas exatas, portas, janelas e objetos do catálogo — salva e volta depois.
+
+Uso individual: cada usuário vê só os projetos dele. Sem compartilhamento, sem colaboração,
+**sem vínculo com nenhum outro projeto ou sistema**.
 
 ### O que este projeto NÃO é
 
-- ❌ **Não tem backend.** Sem API, sem servidor de dados, sem autenticação, sem sessão. Se uma
-  tarefa parece pedir servidor, resolva no cliente ou pergunte — não invente endpoint.
+- ❌ **Não se integra a nada de fora.** Nenhuma API de terceiro, nenhum app hospedeiro, nenhuma
+  sincronização com outro sistema. O que é do usuário fica no Firebase deste projeto.
 - ❌ **Não roda dentro de webview.** É um site aberto no navegador, e só.
 - ❌ **Não busca o catálogo de lugar nenhum.** O catálogo é uma tabela mantida no repositório,
   atualizada por commit.
-
-Consequência prática: tudo é client-side. O projeto do usuário vive no `localStorage` e sai por
-exportação (JSON, PNG, SVG, PDF, DXF, DWG). `services/datastore.ts` é a interface de
-persistência, com uma implementação só — `localStore`.
 
 ### Origem
 
 O repositório nasceu do `open3dFloorplan`, um editor de plantas com renderização 3D. O 3D foi
 removido; o que ficou é o editor 2D, traduzido para PT-BR e reorganizado.
 
-### Direção de produto
-
-**Ainda não definida.** O que existe hoje é o editor 2D descrito acima. Não presuma um rumo a
-partir de nomes de arquivo ou de conversas anteriores — pergunte ao usuário antes de escrever
-código que só faz sentido para um produto específico.
+⚠️ **Sobra do fork:** `.firebaserc` e `apphosting.yaml` ainda apontam para o projeto Firebase
+`openplan3d`, que é do repositório original. Trocar pelo projeto novo quando ele existir.
 
 ## 2. Restrições inegociáveis
 
@@ -37,9 +33,9 @@ código que só faz sentido para um produto específico.
    junto com o catálogo de móveis.
 2. **Zoom, pan, minimapa e snap são funcionalidades centrais** — o usuário precisa deles para
    achar um equipamento na planta. Não degradar em nome de simplificação.
-3. **Tudo roda no navegador.** Sem servidor de dados, sem API, sem sessão. Se uma tarefa parece
-   pedir backend, o caminho certo é resolver no cliente ou perguntar ao usuário — não inventar
-   um endpoint.
+3. **O backend é o Firebase deste projeto, e nada além dele.** Enquanto ele não existir, tudo
+   roda no navegador. Se uma tarefa parece pedir outro servidor ou outra API, o caminho certo é
+   perguntar ao usuário — não inventar um endpoint.
 4. **Compatibilidade de dados.** Projetos já salvos no `localStorage` precisam continuar
    abrindo. Toda mudança de tipo exige migração — ver a skill `modelo-de-dados`.
 5. **Português em tudo que for novo.** Identificadores, tipos, comentários, UI e docs em PT-BR.
@@ -127,14 +123,16 @@ enxerga. A suíte já pegou cinco bugs reais, um deles regressão de refatoraç�
 Os testes vivem em `tests/e2e/` e geram as capturas de `docs/ui/_evidencias/`, que são a
 documentação de interface. Ao mexer na UI, rode `npm test` — as evidências se atualizam sozinhas.
 
-Deploy: Firebase App Hosting (`apphosting.yaml`, projeto `openplan3d`), `@sveltejs/adapter-node`.
+Deploy: Firebase App Hosting (`apphosting.yaml`), `@sveltejs/adapter-node`. ⚠️ o projeto
+configurado ainda é o `openplan3d`, herdado do fork — trocar ao criar o projeto próprio.
 
 ## 4. Arquitetura
 
 ### Stack
 
 SvelteKit 2 · **Svelte 5 (runes)** · TypeScript · Tailwind CSS v4 (via `@tailwindcss/vite`, sem
-`tailwind.config`) · Canvas 2D nativo · jsPDF · dxf-writer · Firebase (só Analytics hoje).
+`tailwind.config`) · Canvas 2D nativo · jsPDF · dxf-writer · Firebase (previsto para conta e
+persistência; hoje inerte, ver §4 Persistência).
 
 ### Rotas
 
@@ -249,16 +247,20 @@ Toda mutação passa por `mutate(fn, descrição, coalesceKey?)`, que aplica a f
   propriedade: passe `coalesceKey` para não gerar uma entrada de undo por tecla.
 - Agrupar várias mutações em um undo: `beginUndoGroup()` / `endUndoGroup(descrição)`.
 
-### Persistência
+### Persistência — localStorage hoje, Firebase depois
 
-Tudo no navegador. `services/datastore.ts` define a interface `DataStore`
-(`save`/`load`/`list`/`delete`/`duplicate`/thumbnails), com uma implementação: `localStore`
-(localStorage). Não há outra e não está previsto haver.
+`services/datastore.ts` define a interface `DataStore`
+(`save`/`load`/`list`/`delete`/`duplicate`/thumbnails). **É o ponto de extensão**: hoje há uma
+implementação (`localStore`, em localStorage), e o `firebaseStore` entra ao lado dela.
 
-Chaves: `floorplan_projects`, `floorplan_thumb_<id>`, `o3d_settings`.
+Chaves do localStorage: `floorplan_projects`, `floorplan_thumb_<id>`, `o3d_settings`.
 
-O `localStorage` tem cota (poucos MB) — `localStore.save()` já trata `QuotaExceededError`. É por
-isso que a exportação em JSON não é conveniência, é a saída de emergência do usuário.
+**Estado atual:** o projeto no Firebase ainda não existe — o nome está por definir. `firebase.ts`
+lê a configuração de variáveis `PUBLIC_FIREBASE_*` (ver `.env.example`) e fica **inerte** sem
+elas. O app funciona normalmente assim; nada é enviado para lugar nenhum.
+
+O `localStorage` tem cota de poucos MB — `localStore.save()` já trata `QuotaExceededError`. Até o
+Firebase entrar, a exportação em JSON não é conveniência: é a saída de emergência do usuário.
 
 `localStore.load()` já faz migração defensiva (preenche arrays ausentes em `Floor`). **Mantenha
 esse ponto como o lugar da migração de esquema.**
@@ -279,7 +281,25 @@ neste repo.
 
 ## 6. Trabalho pendente
 
-Não há roadmap de produto definido (ver §1). O que está pendente é técnico:
+### Firebase — bloqueado até o projeto existir
+
+O usuário ainda vai criar o projeto no Firebase e definir o nome. **Não escreva código de
+Firestore ou de autenticação antes disso** — sem projeto real não há como testar, e código não
+exercitado envelhece errado.
+
+Quando existir, na ordem:
+
+1. **Autenticação** — cadastro e login próprios (Firebase Auth). O site é de uso individual:
+   cada usuário enxerga só os projetos dele.
+2. **`services/firebaseStore.ts`** implementando `DataStore`, ao lado de `localStore`.
+   A escolha entre os dois é de runtime: sem usuário logado, `localStore`.
+3. **Regras de Segurança do Firestore** — quem protege os dados são elas, não o segredo da
+   `apiKey`, que é pública por natureza. Projeto só acessível pelo dono.
+4. **Migração** — ao entrar pela primeira vez, subir os projetos que já estão no `localStorage`
+   daquele navegador. Sem isso o usuário "perde" o que tinha.
+5. **Modo offline** — `localStore` continua útil como cache e para uso sem conta.
+
+### Técnico, sem bloqueio
 
 1. **Testes unitários das funções puras de `utils/`** — geometria de parede, detecção de
    ambiente, encaixe e reconciliação. São as mais fáceis de testar e as mais fáceis de quebrar
@@ -314,9 +334,8 @@ Não há roadmap de produto definido (ver §1). O que está pendente é técnico
 - **Sem testes unitários.** Existe suíte de interface (Playwright, 56 testes), mas as funções
   puras de `utils/` — geometria de parede, detecção de ambiente, encaixe, reconciliação — não têm
   cobertura direta. São as mais fáceis de testar e as mais fáceis de quebrar em refatoração.
-- `src/lib/firebase.ts` só carrega o Analytics (importado sob demanda em `+layout.svelte`). O
-  Firebase aqui é **destino de deploy** (App Hosting), não backend de dados — não confunda os
-  dois nem o use como porta de entrada para armazenar projeto fora do navegador.
+- `.firebaserc` e `apphosting.yaml` ainda apontam para `openplan3d`, projeto do fork original.
+  Trocar quando o projeto novo existir.
 - Ver §6 para o que segue pendente.
 
 ## 8. Branches
