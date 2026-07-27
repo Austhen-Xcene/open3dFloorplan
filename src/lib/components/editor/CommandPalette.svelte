@@ -1,7 +1,7 @@
 <script lang="ts">
   import { furnitureCatalog } from '$lib/utils/furnitureCatalog';
   import { selectedTool, snapEnabled, placingFurnitureId, undo, redo, currentProject } from '$lib/stores/project';
-  import { exportAsPNG, exportAsJSON, exportAsSVG, exportPDF } from '$lib/utils/export';
+  import { exportAsPNG, exportAsJSON, exportAsSVG, exportPDF } from '$lib/utils/exportacao';
   import { exportDXF } from '$lib/utils/cadExport';
   import { get } from 'svelte/store';
   import { goto } from '$app/navigation';

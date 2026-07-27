@@ -7,7 +7,7 @@ import type { Point, Wall, Door, Window as Win, FurnitureItem, Stair, Column, Fl
 import type { Room } from '$lib/models/types';
 import { getCatalogItem } from '$lib/utils/furnitureCatalog';
 import { getRoomPolygon } from '$lib/utils/roomDetection';
-import { wallPointAt } from '$lib/utils/canvasRenderer';
+import { wallPointAt } from '$lib/utils/renderizador';
 import type { HandleType } from '$lib/utils/canvasInteraction';
 
 export function pointInPolygon(p: Point, poly: Point[]): boolean {

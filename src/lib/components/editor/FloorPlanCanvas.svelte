@@ -6,15 +6,25 @@
   import { detectRooms, getRoomPolygon, roomCentroid } from '$lib/utils/roomDetection';
   import { getMaterial } from '$lib/utils/materials';
   import { getCatalogItem } from '$lib/utils/furnitureCatalog';
-  import { drawFurnitureIcon } from '$lib/utils/furnitureIcons';
+  import { drawFurnitureIcon } from '$lib/utils/icones';
   import { handleGlobalShortcut } from '$lib/utils/shortcuts';
+  import { drawRulers as desenharReguas } from '$lib/utils/renderizador';
+  import { encaixarNaParede } from '$lib/utils/encaixeParede';
+  import { executarAcaoMenuContexto } from './canvas/acoesMenuContexto';
+  import { assinaturaGeometria, reconciliarAmbientes } from '$lib/utils/reconciliarAmbientes';
   import ContextMenu from './ContextMenu.svelte';
-  import { roomPresets, placePreset } from '$lib/utils/roomPresets';
-  import { getWallTextureCanvas, getFloorTextureCanvas, setTextureLoadCallback } from '$lib/utils/textureGenerator';
+  import BarraStatus from './canvas/BarraStatus.svelte';
+  import PainelCamadas from './canvas/PainelCamadas.svelte';
+  import DicaFerramenta from './canvas/DicaFerramenta.svelte';
+  import ControleZoomCanvas from './canvas/ControleZoomCanvas.svelte';
+  import BarraElementoSelecionado from './canvas/BarraElementoSelecionado.svelte';
+  import EditorTextoInline from './canvas/EditorTextoInline.svelte';
+  import { roomPresets, placePreset } from '$lib/utils/ambientes';
+  import { getWallTextureCanvas, getFloorTextureCanvas, setTextureLoadCallback } from '$lib/utils/texturas';
   import { projectSettings, formatLength, formatArea } from '$lib/stores/settings';
   import type { ProjectSettings } from '$lib/stores/settings';
   import type { CanvasState } from '$lib/utils/canvasInteraction';
-  import { drawWall as _drawWall, drawDoorOnWall as _drawDoorOnWall, drawWindowOnWall as _drawWindowOnWall, drawDoorDistanceDimensions as _drawDoorDistanceDimensions, drawWindowDistanceDimensions as _drawWindowDistanceDimensions, drawFurnitureItem, drawStair as _drawStair, drawColumn as _drawColumn, drawGuides as _drawGuides, drawPersistedMeasurements as _drawPersistedMeasurements, drawTextAnnotations as _drawTextAnnotations, drawAnnotation as _drawAnnotation, drawAnnotations as _drawAnnotations, drawRooms as _drawRooms, drawWallJoints as _drawWallJoints, drawSnapPoints as _drawSnapPoints, drawMinimap as _drawMinimap } from '$lib/utils/canvasRenderer';
+  import { drawWall as _drawWall, drawDoorOnWall as _drawDoorOnWall, drawWindowOnWall as _drawWindowOnWall, drawDoorDistanceDimensions as _drawDoorDistanceDimensions, drawWindowDistanceDimensions as _drawWindowDistanceDimensions, drawFurnitureItem, drawStair as _drawStair, drawColumn as _drawColumn, drawGuides as _drawGuides, drawPersistedMeasurements as _drawPersistedMeasurements, drawTextAnnotations as _drawTextAnnotations, drawAnnotation as _drawAnnotation, drawAnnotations as _drawAnnotations, drawRooms as _drawRooms, drawWallJoints as _drawWallJoints, drawSnapPoints as _drawSnapPoints, drawMinimap as _drawMinimap } from '$lib/utils/renderizador';
   import { pointInPolygon, positionOnWall, findWallAt as _findWallAt, findHandleAt as _findHandleAt, findFurnitureAt as _findFurnitureAt, findColumnAt as _findColumnAt, findStairAt as _findStairAt, findDoorAt as _findDoorAt, findWindowAt as _findWindowAt, findRoomAt as _findRoomAt, hitTestMeasurement as _hitTestMeasurement, hitTestAnnotation as _hitTestAnnotation, hitTestTextAnnotation as _hitTestTextAnnotation } from '$lib/utils/hitTesting';
 
   let canvas: HTMLCanvasElement;
@@ -231,67 +241,9 @@
    * Snap furniture position so its edge is flush against the nearest wall.
    * Returns adjusted position and rotation, or null if no wall is close enough.
    */
-  function snapFurnitureToWall(pos: Point, catalogId: string, currentRotation: number): { position: Point; rotation: number; wallId: string; side: 'normal' | 'anti'; wallAngle: number } | null {
+  function snapFurnitureToWall(pos: Point, catalogId: string, currentRotation: number) {
     if (!currentFloor) return null;
-    const cat = getCatalogItem(catalogId);
-    if (!cat) return null;
-
-    // Furniture half-depth (the "back" dimension that goes against the wall)
-    const halfDepth = cat.depth / 2;
-
-    let bestDist = WALL_SNAP_DIST;
-    let bestResult: { position: Point; rotation: number; wallId: string; side: 'normal' | 'anti'; wallAngle: number } | null = null;
-
-    for (const wall of currentFloor.walls) {
-      const wx = wall.end.x - wall.start.x;
-      const wy = wall.end.y - wall.start.y;
-      const wLen = Math.hypot(wx, wy);
-      if (wLen < 1) continue;
-
-      // Unit vectors along wall and perpendicular (normal)
-      const ux = wx / wLen, uy = wy / wLen;
-      const nx = -uy, ny = ux; // normal pointing "left" of wall direction
-
-      // Project furniture center onto wall line
-      const dx = pos.x - wall.start.x;
-      const dy = pos.y - wall.start.y;
-      const along = dx * ux + dy * uy; // projection along wall
-      const perp = dx * nx + dy * ny;  // signed distance from wall center-line
-
-      // Check if projection falls within wall segment (with some margin)
-      if (along < -cat.width / 2 || along > wLen + cat.width / 2) continue;
-
-      const wallHalfThickness = wall.thickness / 2;
-      // Distance from furniture center to wall surface on the side the furniture is on
-      const absDist = Math.abs(perp) - wallHalfThickness;
-
-      // We want the furniture edge to touch the wall, so target distance = halfDepth
-      const snapDist = Math.abs(absDist - halfDepth);
-
-      if (snapDist < bestDist) {
-        bestDist = snapDist;
-        const side: 'normal' | 'anti' = perp >= 0 ? 'normal' : 'anti';
-        const sign = perp >= 0 ? 1 : -1;
-        // Position: push center so edge is flush with wall surface
-        const targetPerp = sign * (wallHalfThickness + halfDepth);
-        const clampedAlong = Math.max(cat.width / 2, Math.min(wLen - cat.width / 2, along));
-        const newX = wall.start.x + ux * clampedAlong + nx * targetPerp;
-        const newY = wall.start.y + uy * clampedAlong + ny * targetPerp;
-        // Align rotation: furniture "front" faces away from wall
-        const wallAngle = Math.atan2(wy, wx) * 180 / Math.PI;
-        // Furniture at 0° has depth along Y axis, so align perpendicular
-        const targetRotation = perp >= 0 ? wallAngle : wallAngle + 180;
-
-        bestResult = {
-          position: { x: snap(newX), y: snap(newY) },
-          rotation: ((targetRotation % 360) + 360) % 360,
-          wallId: wall.id,
-          side,
-          wallAngle: wallAngle
-        };
-      }
-    }
-    return bestResult;
+    return encaixarNaParede(currentFloor, pos, catalogId, WALL_SNAP_DIST, snap);
   }
 
   function snap(v: number): number {
@@ -848,98 +800,14 @@
 
   function updateDetectedRooms() {
     if (!currentFloor) return;
-    // Floor ID and wall IDs are part of the hash so switching to another
-    // pavimento with the same geometry still refreshes the current room list.
-    const hash = JSON.stringify([
-      currentFloor.id,
-      currentFloor.walls.map(w => [w.id, w.start, w.end]),
-    ]);
+    const hash = assinaturaGeometria(currentFloor);
     if (hash === lastWallHash) return;
     lastWallHash = hash;
-    const newRooms = detectRooms(currentFloor.walls);
-    const savedRooms = currentFloor.rooms || [];
-    const usedSavedRoomIds = new Set<string>();
-    type Bounds = { left: number; right: number; top: number; bottom: number };
 
-    const getBounds = (room: Room): Bounds | null => {
-      const polygon = getRoomPolygon(room, currentFloor!.walls);
-      if (polygon.length < 3) return null;
-      return {
-        left: Math.min(...polygon.map((point) => point.x)),
-        right: Math.max(...polygon.map((point) => point.x)),
-        top: Math.min(...polygon.map((point) => point.y)),
-        bottom: Math.max(...polygon.map((point) => point.y)),
-      };
-    };
-    const sameBounds = (a: Bounds | null, b: Bounds | null): boolean =>
-      !!a && !!b &&
-      Math.abs(a.left - b.left) < 1 &&
-      Math.abs(a.right - b.right) < 1 &&
-      Math.abs(a.top - b.top) < 1 &&
-      Math.abs(a.bottom - b.bottom) < 1;
-
-    const savedBounds = new Map(
-      savedRooms.map((room) => [room.id, getBounds(room)]),
-    );
-    const reconciledRooms: Room[] = [];
-
-    for (const nr of newRooms) {
-      const nrWalls = new Set(nr.walls);
-      const existing = detectedRooms.find(old => {
-        const oldWalls = new Set(old.walls);
-        return oldWalls.size === nrWalls.size && [...nrWalls].every(w => oldWalls.has(w));
-      });
-      let saved = savedRooms.find(sr => {
-        if (usedSavedRoomIds.has(sr.id)) return false;
-        const srWalls = new Set(sr.walls);
-        return srWalls.size === nrWalls.size && [...nrWalls].every(w => srWalls.has(w));
-      });
-      // Adjacent generated environments have coincident boundary walls. The
-      // detector may choose the neighbour's wall ID, so fall back to matching
-      // the exact geometric bounds rather than losing the persisted metadata.
-      const nrBounds = getBounds(nr);
-      if (!saved) {
-        saved = savedRooms.find((sr) =>
-          !usedSavedRoomIds.has(sr.id) &&
-          sameBounds(nrBounds, savedBounds.get(sr.id) ?? null),
-        );
-      }
-      // Once this floor uses persisted environments, only those environments
-      // are valid rooms. A temporary gap between rooms must never become an
-      // automatic "Room N" made from walls that belong to its neighbours.
-      if (savedRooms.length > 0 && !saved) continue;
-
-      // Persisted user data always wins over the detector's temporary "Room N" names.
-      const metadata = saved ?? existing;
-      if (metadata) {
-        nr.id = metadata.id;
-        nr.name = metadata.name;
-        if (metadata.floorTexture) nr.floorTexture = metadata.floorTexture;
-        nr.color = metadata.color;
-        nr.roomType = metadata.roomType;
-        nr.labelOffset = metadata.labelOffset;
-      }
-      if (saved) usedSavedRoomIds.add(saved.id);
-
-      // Duplicate coincident edges can make the detector emit the same face
-      // more than once. Only render and expose one room for that geometry.
-      if (reconciledRooms.some((room) => sameBounds(getBounds(room), nrBounds))) continue;
-      reconciledRooms.push(nr);
-    }
-
-    // If duplicate shared edges prevented a face from being detected at all,
-    // retain the canonical saved room so its name and properties remain usable.
-    for (const saved of savedRooms) {
-      if (usedSavedRoomIds.has(saved.id)) continue;
-      const bounds = savedBounds.get(saved.id) ?? null;
-      if (!bounds) continue;
-      if (reconciledRooms.some((room) => sameBounds(getBounds(room), bounds))) continue;
-      reconciledRooms.push({ ...saved });
-    }
-    detectedRooms = reconciledRooms;
-    detectedRoomsStore.set(reconciledRooms);
+    const reconciliados = reconciliarAmbientes(currentFloor, detectedRooms);
+    detectedRooms = reconciliados;
+    detectedRoomsStore.set(reconciliados);
   }
-
   function drawGuides() {
     if (!currentFloor) return;
     _drawGuides(getCS(), currentFloor, selectedGuideId, RULER_SIZE);
@@ -953,200 +821,9 @@
     _drawColumn(getCS(), col, selected);
   }
 
-  function rulerLabel(worldCm: number, tickStep: number, isImperial: boolean): string {
-    if (isImperial) {
-      const inches = worldCm / 2.54;
-      const ft = inches / 12;
-      if (tickStep / 2.54 >= 12) {
-        // Show feet
-        return `${ft % 1 === 0 ? ft.toFixed(0) : ft.toFixed(1)}'`;
-      }
-      return `${Math.round(inches)}"`;
-    }
-    // Metric
-    if (tickStep >= 100) {
-      const m = worldCm / 100;
-      return `${worldCm % 100 === 0 ? m.toFixed(0) : m.toFixed(1)}m`;
-    }
-    return `${Math.round(worldCm)}`;
-  }
-
   function drawRulers() {
     if (!ctx || !showRulers) return;
-    const R = RULER_SIZE;
-    const fontSize = 9;
-    const isImperial = dimSettings.units === 'imperial';
-    ctx.save();
-
-    // Determine tick spacing based on zoom
-    // For imperial: use inch-friendly steps (in cm equivalents)
-    // For metric: use cm-friendly steps
-    let tickStep: number;
-    let minorDiv: number;
-    let minorStep: number;
-
-    if (isImperial) {
-      // Nice steps in inches, stored as cm: 1in, 2in, 6in, 1ft, 2ft, 5ft, 10ft, 20ft, 50ft, 100ft
-      const inchCm = 2.54;
-      const niceInchSteps = [1, 2, 6, 12, 24, 60, 120, 240, 600, 1200, 2400];
-      const niceStepsCm = niceInchSteps.map(i => i * inchCm);
-      tickStep = niceStepsCm[niceStepsCm.length - 1];
-      for (const s of niceStepsCm) {
-        if (s * zoom >= 40) { tickStep = s; break; }
-      }
-      const tickInches = tickStep / inchCm;
-      // Minor divisions: if >= 1ft, divide by 6 (every 2in); else divide by 2
-      minorDiv = tickInches >= 12 ? 6 : tickInches >= 6 ? 3 : 2;
-      minorStep = tickStep / minorDiv;
-    } else {
-      const niceSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
-      tickStep = niceSteps[niceSteps.length - 1];
-      for (const s of niceSteps) {
-        if (s * zoom >= 40) { tickStep = s; break; }
-      }
-      minorDiv = tickStep >= 100 ? 5 : tickStep >= 10 ? 5 : 2;
-      minorStep = tickStep / minorDiv;
-    }
-
-    // --- Horizontal ruler (top) ---
-    ctx.fillStyle = '#f1f3f5';
-    ctx.fillRect(R, 0, width - R, R);
-    ctx.strokeStyle = '#d1d5db';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(R, R); ctx.lineTo(width, R); ctx.stroke();
-
-    // Ticks
-    const worldLeft = screenToWorld(R, 0).x;
-    const worldRight = screenToWorld(width, 0).x;
-    const startTick = Math.floor(worldLeft / minorStep) * minorStep;
-
-    ctx.fillStyle = '#6b7280';
-    ctx.font = `${fontSize}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-
-    for (let wx = startTick; wx <= worldRight; wx += minorStep) {
-      const sx = worldToScreen(wx, 0).x;
-      if (sx < R) continue;
-      const isMajor = Math.abs(wx % tickStep) < 0.01;
-      const isMid = !isMajor && Math.abs(wx % (tickStep / 2)) < 0.01 && minorDiv >= 4;
-      const tickH = isMajor ? R * 0.7 : isMid ? R * 0.45 : R * 0.25;
-
-      // Highlight origin tick
-      const isOrigin = Math.abs(wx) < 0.01;
-      ctx.strokeStyle = isOrigin ? '#ef4444' : isMajor ? '#9ca3af' : '#d1d5db';
-      ctx.lineWidth = isOrigin ? 1.5 : isMajor ? 1 : 0.5;
-      ctx.beginPath();
-      ctx.moveTo(sx, R);
-      ctx.lineTo(sx, R - tickH);
-      ctx.stroke();
-
-      if (isMajor) {
-        ctx.fillStyle = isOrigin ? '#ef4444' : '#6b7280';
-        const label = isOrigin ? '0' : rulerLabel(wx, tickStep, isImperial);
-        ctx.fillText(label, sx, 2);
-        ctx.fillStyle = '#6b7280';
-      }
-    }
-
-    // --- Vertical ruler (left) ---
-    ctx.fillStyle = '#f1f3f5';
-    ctx.fillRect(0, R, R, height - R);
-    ctx.strokeStyle = '#d1d5db';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(R, R); ctx.lineTo(R, height); ctx.stroke();
-
-    const worldTop = screenToWorld(0, R).y;
-    const worldBottom = screenToWorld(0, height).y;
-    const startTickY = Math.floor(worldTop / minorStep) * minorStep;
-
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-
-    for (let wy = startTickY; wy <= worldBottom; wy += minorStep) {
-      const sy = worldToScreen(0, wy).y;
-      if (sy < R) continue;
-      const isMajor = Math.abs(wy % tickStep) < 0.01;
-      const isMid = !isMajor && Math.abs(wy % (tickStep / 2)) < 0.01 && minorDiv >= 4;
-      const tickH = isMajor ? R * 0.7 : isMid ? R * 0.45 : R * 0.25;
-
-      const isOrigin = Math.abs(wy) < 0.01;
-      ctx.strokeStyle = isOrigin ? '#ef4444' : isMajor ? '#9ca3af' : '#d1d5db';
-      ctx.lineWidth = isOrigin ? 1.5 : isMajor ? 1 : 0.5;
-      ctx.beginPath();
-      ctx.moveTo(R, sy);
-      ctx.lineTo(R - tickH, sy);
-      ctx.stroke();
-
-      if (isMajor) {
-        const label = isOrigin ? '0' : rulerLabel(wy, tickStep, isImperial);
-        ctx.save();
-        ctx.translate(R - 3, sy);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillStyle = isOrigin ? '#ef4444' : '#6b7280';
-        ctx.font = `${fontSize}px sans-serif`;
-        ctx.fillText(label, 0, 0);
-        ctx.restore();
-      }
-    }
-
-    // Corner square with origin marker
-    ctx.fillStyle = '#e5e7eb';
-    ctx.fillRect(0, 0, R, R);
-    ctx.strokeStyle = '#d1d5db';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, R, R);
-    // Origin crosshair in corner
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 1;
-    const cx = R / 2, cy = R / 2;
-    ctx.beginPath();
-    ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy);
-    ctx.moveTo(cx, cy - 4); ctx.lineTo(cx, cy + 4);
-    ctx.stroke();
-
-    // Mouse position indicators on rulers — thin line + triangle
-    const mScreen = worldToScreen(mousePos.x, mousePos.y);
-
-    // Horizontal: thin tracking line spanning ruler height
-    if (mScreen.x > R) {
-      ctx.strokeStyle = 'rgba(59,130,246,0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(mScreen.x, 0);
-      ctx.lineTo(mScreen.x, R);
-      ctx.stroke();
-      // Triangle indicator
-      ctx.fillStyle = '#3b82f6';
-      ctx.beginPath();
-      ctx.moveTo(mScreen.x, R);
-      ctx.lineTo(mScreen.x - 3, R - 6);
-      ctx.lineTo(mScreen.x + 3, R - 6);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // Vertical: thin tracking line spanning ruler width
-    if (mScreen.y > R) {
-      ctx.strokeStyle = 'rgba(59,130,246,0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, mScreen.y);
-      ctx.lineTo(R, mScreen.y);
-      ctx.stroke();
-      // Triangle indicator
-      ctx.fillStyle = '#3b82f6';
-      ctx.beginPath();
-      ctx.moveTo(R, mScreen.y);
-      ctx.lineTo(R - 6, mScreen.y - 3);
-      ctx.lineTo(R - 6, mScreen.y + 3);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.restore();
+    desenharReguas(getCS(), dimSettings, RULER_SIZE, mousePos);
   }
 
   function drawBackgroundImage() {
@@ -3569,134 +3246,16 @@
     ctxMenuVisible = true;
   }
 
-  function handleContextMenuAction(action: string, _data?: any) {
+  function handleContextMenuAction(action: string) {
     if (!currentFloor) return;
-    const id = ctxMenuTargetId;
-
-    switch (action) {
-      // Furniture actions
-      case 'duplicate-furniture':
-        if (id) { const newId = duplicateFurniture(id); if (newId) selectedElementId.set(newId); }
-        break;
-      case 'rotate-furniture-90':
-        if (id) rotateFurniture(id, 90);
-        break;
-      case 'flip-horizontal':
-        if (id) {
-          const fi = currentFloor.furniture.find(f => f.id === id);
-          if (fi) scaleFurniture(id, { x: -(fi.scale?.x ?? 1), y: fi.scale?.y ?? 1 });
-        }
-        break;
-      case 'bring-to-front':
-        if (id) {
-          const idx = currentFloor.furniture.findIndex(f => f.id === id);
-          if (idx >= 0) {
-            const [item] = currentFloor.furniture.splice(idx, 1);
-            currentFloor.furniture.push(item);
-          }
-        }
-        break;
-      case 'send-to-back':
-        if (id) {
-          const idx = currentFloor.furniture.findIndex(f => f.id === id);
-          if (idx >= 0) {
-            const [item] = currentFloor.furniture.splice(idx, 1);
-            currentFloor.furniture.unshift(item);
-          }
-        }
-        break;
-
-      // Wall actions
-      case 'split-wall':
-        if (id) { const newId = splitWall(id, 0.5); if (newId) selectedElementId.set(null); }
-        break;
-      case 'toggle-curve':
-        if (id && ctxMenuWall) {
-          if (ctxMenuWall.curvePoint) {
-            updateWall(id, { curvePoint: undefined } as any);
-          } else {
-            const mx = (ctxMenuWall.start.x + ctxMenuWall.end.x) / 2;
-            const my = (ctxMenuWall.start.y + ctxMenuWall.end.y) / 2;
-            const dx = ctxMenuWall.end.x - ctxMenuWall.start.x;
-            const dy = ctxMenuWall.end.y - ctxMenuWall.start.y;
-            const len = Math.hypot(dx, dy) || 1;
-            updateWall(id, { curvePoint: { x: mx + (-dy / len) * 50, y: my + (dx / len) * 50 } });
-          }
-        }
-        break;
-
-      // Room actions
-      case 'change-floor-texture':
-        // Select the room so PropertiesPanel shows it
-        if (ctxMenuRoom) selectedRoomId.set(ctxMenuRoom.id);
-        break;
-      case 'delete-room':
-        if (ctxMenuRoom) {
-          // Only a persisted room owns walls and may delete them. Detector-only
-          // faces can borrow walls from multiple neighbouring environments.
-          const savedRoom = currentFloor?.rooms.find((room) => room.id === ctxMenuRoom?.id);
-          if (savedRoom) {
-            beginUndoGroup();
-            for (const wid of savedRoom.walls) removeElement(wid);
-            endUndoGroup();
-          }
-          selectedRoomId.set(null);
-          selectedElementIds.set(new Set());
-          selectedElementId.set(null);
-        }
-        break;
-
-      // Canvas actions
-      case 'paste':
-        // Trigger paste via synthetic keyboard event
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, metaKey: true }));
-        break;
-      case 'select-all':
-        if (currentFloor) {
-          const allIds = new Set<string>();
-          currentFloor.walls.forEach(w => allIds.add(w.id));
-          currentFloor.furniture.forEach(f => allIds.add(f.id));
-          currentFloor.doors.forEach(d => allIds.add(d.id));
-          currentFloor.windows.forEach(w => allIds.add(w.id));
-          if (currentFloor.stairs) currentFloor.stairs.forEach(s => allIds.add(s.id));
-          if (currentFloor.columns) currentFloor.columns.forEach(c => allIds.add(c.id));
-          selectedElementIds.set(allIds);
-        }
-        break;
-      case 'add-wall':
-        selectedTool.set('wall');
-        break;
-      case 'zoom-to-fit':
-        zoomToFit();
-        break;
-
-      // Lock/Unlock
-      case 'toggle-lock':
-        if (id) toggleFurnitureLock(id);
-        break;
-
-      // Group/Ungroup
-      case 'group':
-        if (currentFloor && currentSelectedIds.size >= 2) {
-          createGroup([...currentSelectedIds]);
-        }
-        break;
-      case 'ungroup':
-        if (currentFloor) {
-          const idsToUngroup = currentSelectedIds.size > 0 ? [...currentSelectedIds] : (id ? [id] : []);
-          if (idsToUngroup.length > 0) ungroupElements(idsToUngroup);
-        }
-        break;
-
-      // Shared actions
-      case 'delete':
-        if (id) { removeElement(id); selectedElementId.set(null); }
-        break;
-      case 'properties':
-        // Select element so PropertiesPanel shows it
-        if (id) selectedElementId.set(id);
-        break;
-    }
+    executarAcaoMenuContexto(action, {
+      pavimento: currentFloor,
+      idAlvo: ctxMenuTargetId,
+      parede: ctxMenuWall,
+      ambiente: ctxMenuRoom,
+      idsSelecionados: currentSelectedIds,
+      enquadrar: () => zoomToFit(),
+    });
   }
 
   let cursorStyle = $derived(
@@ -3723,7 +3282,6 @@
     'crosshair'
   );
 </script>
-
 <svelte:window on:keydown={onKeyDown} on:keyup={onKeyUp} />
 
 <div class="w-full h-full relative overflow-hidden" role="application">
@@ -3731,7 +3289,7 @@
     bind:this={canvas}
     class="block w-full h-full touch-none"
     tabindex="0"
-    aria-label="Floor plan editor canvas"
+    aria-label="Área de desenho da planta"
     style="cursor: {cursorStyle}"
     onmousedown={onMouseDown}
     onmousemove={onMouseMove}
@@ -3743,16 +3301,14 @@
     ondragleave={onDragLeave}
     ondrop={onDrop}
   ></canvas>
+
   {#if currentSelectedRoomId && currentFloor && currentTool === 'select'}
-    {@const selectedRoomBBox = getMultiSelectBBox()}
-    {#if selectedRoomBBox}
-      {@const rotateButtonPos = worldToScreen(
-        (selectedRoomBBox.minX + selectedRoomBBox.maxX) / 2,
-        selectedRoomBBox.minY,
-      )}
+    {@const bbox = getMultiSelectBBox()}
+    {#if bbox}
+      {@const pos = worldToScreen((bbox.minX + bbox.maxX) / 2, bbox.minY)}
       <button
         class="absolute z-50 h-9 flex items-center gap-2 rounded-lg bg-slate-800 px-4 text-sm font-medium text-blue-300 shadow-lg hover:bg-slate-700 hover:text-blue-200 transition-colors"
-        style="left: {rotateButtonPos.x}px; top: {rotateButtonPos.y - 8}px; transform: translate(-50%, -100%);"
+        style="left: {pos.x}px; top: {pos.y - 8}px; transform: translate(-50%, -100%);"
         title="Girar ambiente 90°"
         aria-label="Girar ambiente 90 graus"
         onclick={rotateSelectedRoom}
@@ -3765,64 +3321,25 @@
       </button>
     {/if}
   {/if}
-  <!-- Inline text annotation editor -->
-  {#if editingTextAnnotationId}
-    <input
-      type="text"
-      class="absolute bg-white border-2 border-blue-500 rounded px-2 py-1 text-sm text-center shadow-lg outline-none"
-      style="left: {editingTextAnnotationPos.x}px; top: {editingTextAnnotationPos.y}px; transform: translate(-50%, -50%); z-index: 20; min-width: 120px;"
-      value={editingTextAnnotationValue}
-      oninput={(e) => { editingTextAnnotationValue = (e.target as HTMLInputElement).value; }}
-      onkeydown={(e) => {
-        e.stopPropagation();
-        if (e.key === 'Enter') {
-          if (editingTextAnnotationValue.trim()) {
-            updateTextAnnotation(editingTextAnnotationId!, { text: editingTextAnnotationValue });
-          } else {
-            removeTextAnnotation(editingTextAnnotationId!);
-            selectedTextAnnotationId = null;
-            selectedElementId.set(null);
-          }
-          editingTextAnnotationId = null;
-        } else if (e.key === 'Escape') {
-          // If it was a new annotation with default text and user cancels, remove it
-          if (currentFloor?.textAnnotations) {
-            const ta = currentFloor.textAnnotations.find(t => t.id === editingTextAnnotationId);
-            if (ta && ta.text === 'Text' && !editingTextAnnotationValue.trim()) {
-              removeTextAnnotation(editingTextAnnotationId!);
-              selectedTextAnnotationId = null;
-              selectedElementId.set(null);
-            }
-          }
-          editingTextAnnotationId = null;
-        }
-      }}
-      onblur={() => {
-        if (editingTextAnnotationId) {
-          if (editingTextAnnotationValue.trim()) {
-            updateTextAnnotation(editingTextAnnotationId, { text: editingTextAnnotationValue });
-          } else {
-            removeTextAnnotation(editingTextAnnotationId);
-            selectedTextAnnotationId = null;
-            selectedElementId.set(null);
-          }
-          editingTextAnnotationId = null;
-        }
-      }}
-      autofocus
-    />
-  {/if}
-  <!-- Empty state hint -->
+
+  <EditorTextoInline
+    bind:id={editingTextAnnotationId}
+    bind:valor={editingTextAnnotationValue}
+    posicao={editingTextAnnotationPos}
+    pavimento={currentFloor}
+    onEncerrar={() => { selectedTextAnnotationId = null; markDirty(); }}
+  />
+
   {#if currentFloor && currentFloor.walls.length === 0 && currentFloor.furniture.length === 0 && currentFloor.doors.length === 0}
     <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
       <div class="text-center opacity-60">
         <div class="text-5xl mb-3">🏠</div>
-        <div class="text-sm font-medium text-gray-500">Start building your floor plan</div>
-        <div class="text-xs text-gray-400 mt-1">Use as ferramentas da lateral para começar a planta</div>
+        <div class="text-sm font-medium text-gray-500">Comece a planta da sua casa</div>
+        <div class="text-xs text-gray-400 mt-1">Use as ferramentas da lateral para inserir os ambientes</div>
       </div>
     </div>
   {/if}
-  <!-- Mini-map -->
+
   {#if showMinimap && currentFloor && currentFloor.walls.length > 0}
     <canvas
       bind:this={minimapCanvas}
@@ -3833,240 +3350,51 @@
       onclick={onMinimapClick}
     ></canvas>
   {/if}
-  <div class="absolute bottom-2 right-2 bg-white/80 rounded px-2 py-1 text-xs text-gray-500 flex gap-3">
-    {#if detectedRooms.length > 0}
-      <span>{detectedRooms.length} room{detectedRooms.length !== 1 ? 's' : ''}</span>
-      <span>{formatArea(detectedRooms.reduce((s, r) => s + r.area, 0), $projectSettings.units)}</span>
-      <span class="text-gray-300">|</span>
-    {/if}
-    {#if currentFloor}
-      <span>{currentFloor.walls.length} wall{currentFloor.walls.length !== 1 ? 's' : ''}</span>
-      {#if currentFloor.doors.length > 0}
-        <span>{currentFloor.doors.length} door{currentFloor.doors.length !== 1 ? 's' : ''}</span>
-      {/if}
-      {#if currentFloor.windows.length > 0}
-        <span>{currentFloor.windows.length} window{currentFloor.windows.length !== 1 ? 's' : ''}</span>
-      {/if}
-      {#if currentFloor.furniture.length > 0}
-        <span>{currentFloor.furniture.length} object{currentFloor.furniture.length !== 1 ? 's' : ''}</span>
-      {/if}
-      <span class="text-gray-300">|</span>
-    {/if}
-    {#if !currentSelectedRoomId && currentSelectedIds.size > 1}
-      <span class="text-blue-600 font-medium">{currentSelectedIds.size} selected</span>
-      <span class="text-gray-300">|</span>
-    {/if}
-    <span>Zoom: {Math.round(zoom * 100)}%</span>
-    <button class="hover:text-gray-700" onclick={() => zoomToFit()} title="Zoom to Fit (F)">⊞ Fit</button>
-    <button class="hover:text-gray-700" onclick={() => showGrid = !showGrid} title="Toggle Grid (G)">
-      {showGrid ? '▦' : '▢'} Grid
-    </button>
-    <button class="hover:text-gray-700" onclick={() => projectSettings.update(s => ({ ...s, snapToGrid: !s.snapToGrid }))} title="Toggle Snap to Grid (S)">
-      {currentSnapToGrid ? '🧲' : '↔'} Snap
-    </button>
-    <button class="hover:text-gray-700" onclick={() => layerVisibility.update(v => ({ ...v, furniture: !v.furniture }))} title="Toggle Furniture">
-      {showFurniture ? '🪑' : '👻'} Furniture
-    </button>
-    <button class="hover:text-gray-700" onclick={() => showLayerPanel = !showLayerPanel} title="Layer Visibility">
-      🗂 Layers
-    </button>
-    <button class="hover:text-gray-700" onclick={() => showRulers = !showRulers} title="Toggle Rulers">
-      {showRulers ? '📏' : '📐'} Rulers
-    </button>
-    <button class="hover:text-gray-700" onclick={() => showMinimap = !showMinimap} title="Toggle Mini-map">
-      {showMinimap ? '🗺' : '🗺'} Map
-    </button>
-  </div>
-  <!-- Layer Visibility Panel -->
+
+  <BarraStatus
+    pavimento={currentFloor}
+    ambientesDetectados={detectedRooms}
+    {zoom}
+    qtdSelecionada={currentSelectedRoomId ? 0 : currentSelectedIds.size}
+    bind:grade={showGrid}
+    bind:reguas={showRulers}
+    bind:minimapa={showMinimap}
+    bind:painelCamadas={showLayerPanel}
+    mostrarEquipamentos={showFurniture}
+    encaixeNaGrade={currentSnapToGrid}
+    onEnquadrar={() => zoomToFit()}
+  />
+
   {#if showLayerPanel}
-    <div class="absolute bottom-12 right-2 z-20 bg-white rounded-lg shadow-lg border border-gray-200 p-3 text-xs min-w-[160px]">
-      <div class="font-semibold text-gray-700 mb-2">Layers</div>
-      {#each [['walls','Walls'],['doors','Doors'],['windows','Windows'],['furniture','Furniture'],['stairs','Stairs'],['columns','Columns'],['guides','Guides'],['measurements','Measurements']] as [key, label]}
-        <label class="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1">
-          <input type="checkbox" checked={(layerVis as Record<string, boolean>)[key]} onchange={() => layerVisibility.update(v => ({ ...v, [key]: !(v as Record<string, boolean>)[key] }))} class="accent-blue-500" />
-          <span>{label}</span>
-        </label>
-      {/each}
-      <hr class="my-1 border-gray-100" />
-      <label class="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1">
-        <input type="checkbox" bind:checked={showRoomLabels} class="accent-blue-500" />
-        <span>Room Labels</span>
-      </label>
-      <label class="flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1">
-        <input type="checkbox" bind:checked={showDimensions} class="accent-blue-500" />
-        <span>Dimensions</span>
-      </label>
-    </div>
+    <PainelCamadas
+      visibilidade={layerVis}
+      bind:rotulosAmbiente={showRoomLabels}
+      bind:cotas={showDimensions}
+    />
   {/if}
 
-  <!-- Contextual Toolbar (hidden while the integrated elevation view covers the canvas) -->
   {#if (currentSelectedId || currentSelectedIds.size > 0) && currentFloor && currentTool === 'select'}
-    {@const el = (() => {
-      const f = currentFloor;
-      const wall = f.walls.find(w => w.id === currentSelectedId);
-      if (wall) {
-        const s = worldToScreen((wall.start.x + wall.end.x) / 2, (wall.start.y + wall.end.y) / 2);
-        return { type: 'wall', pos: s };
-      }
-      const door = f.doors.find(d => d.id === currentSelectedId);
-      if (door) {
-        const w = f.walls.find(w => w.id === door.wallId);
-        if (w) {
-          const s = worldToScreen(w.start.x + (w.end.x - w.start.x) * door.position, w.start.y + (w.end.y - w.start.y) * door.position);
-          return { type: 'door', pos: s, door };
-        }
-      }
-      const win = f.windows.find(w => w.id === currentSelectedId);
-      if (win) {
-        const w = f.walls.find(w => w.id === win.wallId);
-        if (w) {
-          const s = worldToScreen(w.start.x + (w.end.x - w.start.x) * win.position, w.start.y + (w.end.y - w.start.y) * win.position);
-          return { type: 'window', pos: s };
-        }
-      }
-      const furn = f.furniture.find(fi => fi.id === currentSelectedId);
-      if (furn) {
-        const s = worldToScreen(furn.position.x, furn.position.y);
-        return { type: 'furniture', pos: s };
-      }
-      return null;
-    })()}
-    {#if el}
-      <div
-        class="absolute z-40 flex items-center gap-0.5 bg-white rounded-lg shadow-lg border border-gray-200 px-1 py-0.5"
-        style="left: {el.pos.x}px; top: {el.pos.y - 44}px; transform: translateX(-50%);"
-      >
-        <button
-          class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
-          title="Duplicate"
-          aria-label="Duplicate"
-          onclick={() => {
-            if (!currentSelectedId || !currentFloor) return;
-            let newId: string | null = null;
-            if (el.type === 'door') newId = duplicateDoor(currentSelectedId);
-            else if (el.type === 'window') newId = duplicateWindow(currentSelectedId);
-            else if (el.type === 'furniture') newId = duplicateFurniture(currentSelectedId);
-            else if (el.type === 'wall') newId = duplicateWall(currentSelectedId);
-            if (newId) selectedElementId.set(newId);
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
-        </button>
-        {#if el.type === 'door' && el.door}
-          <button
-            class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
-            title="Flip swing"
-            aria-label="Flip swing"
-            onclick={() => { if (el.door) updateDoor(el.door.id, { swingDirection: el.door.swingDirection === 'left' ? 'right' : 'left' }); }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
-          </button>
-        {/if}
-        {#if el.type === 'wall' && currentSelectedId && currentSelectedIds.size === 0}
-          <button
-            class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700"
-            title="Split wall at midpoint"
-            aria-label="Split wall at midpoint"
-            onclick={() => {
-              if (currentSelectedId) {
-                const newId = splitWall(currentSelectedId, 0.5);
-                if (newId) selectedElementId.set(null);
-              }
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M4 12h4M16 12h4"/></svg>
-          </button>
-        {/if}
-        <div class="w-px h-5 bg-gray-200 mx-0.5"></div>
-        <button
-          class="w-7 h-7 flex items-center justify-center rounded hover:bg-red-50 text-gray-400 hover:text-red-600"
-          title="Delete"
-          aria-label="Delete"
-          onclick={() => {
-            if (currentSelectedIds.size > 0) {
-              beginUndoGroup();
-              for (const id of currentSelectedIds) removeElement(id);
-              endUndoGroup();
-              selectedElementIds.set(new Set());
-              selectedElementId.set(null);
-            } else if (currentSelectedId) {
-              removeElement(currentSelectedId);
-              selectedElementId.set(null);
-            }
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14"/></svg>
-        </button>
-      </div>
-    {/if}
-  {/if}
-  {#if currentTool === 'wall' && wallStart}
-    <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-3 py-1 rounded-full text-xs shadow">
-      Click to add wall segment · Double-click to finish · C to close loop · Esc to cancel
-    </div>
-  {/if}
-  {#if currentPlacingId && currentTool === 'furniture'}
-    <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-purple-600 text-white px-3 py-1 rounded-full text-xs shadow">
-      Click to place · Scroll or R to rotate ({currentPlacingRotation}°) · Esc to cancel
-    </div>
-  {/if}
-  {#if measuring}
-    <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-red-600 text-white px-3 py-1 rounded-full text-xs shadow">
-      Right-click two points to measure · M to exit · Esc to cancel
-    </div>
-  {/if}
-  {#if textAnnotationMode}
-    <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-3 py-1 rounded-full text-xs shadow">
-      Click to place text label · Esc to cancel
-    </div>
-  {/if}
-  {#if annotating}
-    <div class="absolute top-2 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs shadow">
-      {annotationStart ? 'Click second point to create annotation' : 'Click first point'} · N to exit · Esc to cancel
-    </div>
+    <BarraElementoSelecionado
+      pavimento={currentFloor}
+      idSelecionado={currentSelectedId}
+      idsSelecionados={currentSelectedIds}
+      paraTela={worldToScreen}
+    />
   {/if}
 
-  <!-- Zoom Controls (bottom-left) -->
-  <div class="absolute bottom-3 left-3 z-20 flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 px-1 py-0.5">
-    <button
-      class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-600 hover:text-gray-800 font-bold text-lg"
-      title="Zoom Out (−)"
-      aria-label="Zoom out"
-      onclick={() => {
-        const newZoom = Math.max(0.1, zoom * 0.8);
-        // Zoom towards canvas center
-        const worldCX = (width / 2 - width / 2) / zoom + camX;
-        const worldCY = (height / 2 - height / 2) / zoom + camY;
-        camX = worldCX - (width / 2 - width / 2) / newZoom;
-        camY = worldCY - (height / 2 - height / 2) / newZoom;
-        zoom = newZoom;
-      }}
-    >−</button>
-    <button
-      class="min-w-[3.5rem] h-7 flex items-center justify-center rounded hover:bg-gray-100 text-xs font-medium text-gray-600 hover:text-gray-800 tabular-nums"
-      title="Reset to 100%"
-      aria-label="Zoom to 100%"
-      onclick={() => { zoom = 1; }}
-    >{Math.round(zoom * 100)}%</button>
-    <button
-      class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-600 hover:text-gray-800 font-bold text-lg"
-      title="Zoom In (+)"
-      aria-label="Zoom in"
-      onclick={() => {
-        const newZoom = Math.min(10, zoom * 1.25);
-        zoom = newZoom;
-      }}
-    >+</button>
-    <div class="w-px h-5 bg-gray-200"></div>
-    <button
-      class="w-7 h-7 flex items-center justify-center rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 text-sm"
-      title="Zoom to Fit (F)"
-      aria-label="Zoom to fit"
-      onclick={() => zoomToFit()}
-    >⊞</button>
-  </div>
+  <DicaFerramenta
+    ferramenta={currentTool}
+    desenhandoParede={!!wallStart}
+    idEmColocacao={currentPlacingId}
+    rotacaoEmColocacao={currentPlacingRotation}
+    medindo={measuring}
+    anotandoTexto={textAnnotationMode}
+    anotandoCota={annotating}
+    primeiroPontoCota={!!annotationStart}
+  />
 
-  <!-- Context Menu -->
+  <ControleZoomCanvas bind:zoom onEnquadrar={() => zoomToFit()} />
+
   <ContextMenu
     x={ctxMenuX}
     y={ctxMenuY}
