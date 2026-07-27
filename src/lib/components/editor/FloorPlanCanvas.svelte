@@ -38,12 +38,26 @@
 
   // Camera
 
-  // Dirty flag for render optimization — only redraw when something changes
-  // Sync zoom with shared store
+  // O laço de desenho só repinta quando `canvasDirty` está marcado.
   canvasZoom.subscribe(v => { ui.zoom = v; });
   $effect(() => { canvasZoom.set(ui.zoom); });
   $effect(() => { canvasCamX.set(ui.camX); });
   $effect(() => { canvasCamY.set(ui.camY); });
+
+  /**
+   * Alternar grade, réguas, minimapa ou camada muda o que deve aparecer, mas não passa
+   * por nenhum handler que marque o canvas como sujo — sem isto, a mudança só aparecia
+   * no próximo movimento do mouse.
+   */
+  $effect(() => {
+    void ui.showGrid; void ui.showRulers; void ui.showMinimap;
+    void ui.showRoomLabels; void ui.showDimensions;
+    void ui.layerVis.walls; void ui.layerVis.doors; void ui.layerVis.windows;
+    void ui.layerVis.furniture; void ui.layerVis.stairs; void ui.layerVis.columns;
+    void ui.layerVis.guides; void ui.layerVis.measurements; void ui.layerVis.annotations;
+    void ui.dimSettings;
+    markDirty();
+  });
 
   // Wall drawing state
   // Digits typed while drawing a wall — Enter places the wall at exactly this length (issue #6)
@@ -2128,10 +2142,19 @@
     }
   }
 
+  /** Deslocamento mínimo, em px de tela, para o gesto valer como arrasto e não clique. */
+  const LIMIAR_ARRASTO = 3;
+
   function onMouseMove(e: MouseEvent) {
     markDirty();
     const rect = ui.canvas.getBoundingClientRect();
+    const anterior = ui.mousePos;
     ui.mousePos = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+    if (e.buttons !== 0 && !ui.arrastouDeVerdade) {
+      const percorrido = Math.hypot(ui.mousePos.x - anterior.x, ui.mousePos.y - anterior.y) * ui.zoom;
+      if (percorrido >= LIMIAR_ARRASTO) ui.arrastouDeVerdade = true;
+    }
 
     // Drag room label
     if (ui.draggingRoomLabelId) {
@@ -2503,16 +2526,22 @@
       ?? (ui.draggingMultiSelect ? ui.currentSelectedRoomId : null);
     if (droppedRoomId) resolveRoomOverlap(droppedRoomId);
 
-    if (ui.draggingFurnitureId) commitFurnitureMove();
-    if (ui.draggingHandle) commitFurnitureMove();
-    if (ui.draggingWallEndpoint) commitFurnitureMove();
-    if (ui.draggingWallParallel) commitFurnitureMove();
-    if (ui.draggingCurveHandle) commitFurnitureMove();
-    if (ui.draggingMultiSelect) commitFurnitureMove();
-    if (ui.draggingRoomId) commitFurnitureMove();
-    if (ui.draggingStairId) commitFurnitureMove();
-    if (ui.draggingColumnId) commitFurnitureMove();
-    if (ui.draggingTextAnnotationId) commitFurnitureMove();
+    // Só registra no histórico se o ponteiro andou de verdade. Sem isto, um clique
+    // simples num elemento criava uma entrada fantasma e o Ctrl+Z seguinte "não fazia
+    // nada" — o usuário precisava desfazer duas vezes.
+    if (ui.arrastouDeVerdade) {
+      if (ui.draggingFurnitureId) commitFurnitureMove();
+      if (ui.draggingHandle) commitFurnitureMove();
+      if (ui.draggingWallEndpoint) commitFurnitureMove();
+      if (ui.draggingWallParallel) commitFurnitureMove();
+      if (ui.draggingCurveHandle) commitFurnitureMove();
+      if (ui.draggingMultiSelect) commitFurnitureMove();
+      if (ui.draggingRoomId) commitFurnitureMove();
+      if (ui.draggingStairId) commitFurnitureMove();
+      if (ui.draggingColumnId) commitFurnitureMove();
+      if (ui.draggingTextAnnotationId) commitFurnitureMove();
+    }
+    ui.arrastouDeVerdade = false;
     ui.draggingTextAnnotationId = null;
     ui.draggingRoomId = null;
     ui.roomDragStartPositions.clear();

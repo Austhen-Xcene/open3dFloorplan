@@ -80,6 +80,11 @@ export class EstadoCanvas {
   draggingTextAnnotationId: string | null = $state(null);
   textAnnotationDragOffset: Point = { x: 0, y: 0 };
   dragPreview: { x: number; y: number; type: string; width: number; depth: number } | null = $state(null);
+  /**
+   * O ponteiro andou o bastante para valer como arrasto?
+   * Separa clique de arrasto: só arrasto de verdade entra no histórico.
+   */
+  arrastouDeVerdade = false;
 
   // ── Arrasto de ambiente e do rótulo dele ────────────────────────────────
   draggingRoomLabelId: string | null = $state(null);

@@ -21,7 +21,7 @@
   const LINHA = 'flex items-center gap-2 py-0.5 cursor-pointer hover:bg-gray-50 rounded px-1';
 </script>
 
-<div class="absolute bottom-12 right-2 z-20 bg-white rounded-lg shadow-lg border border-gray-200 p-3 text-xs min-w-[160px]">
+<div class="absolute bottom-12 right-2 z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-3 text-xs min-w-[160px]">
   <div class="font-semibold text-gray-700 mb-2">Camadas</div>
 
   {#each CAMADAS as [chave, rotulo]}

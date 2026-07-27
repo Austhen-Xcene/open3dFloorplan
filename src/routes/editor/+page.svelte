@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Project } from '$lib/models/types';
   import { currentProject, createDefaultProject, selectedTool, placingFurnitureId } from '$lib/stores/project';
   import { localStore } from '$lib/services/datastore';
   import TopBar from '$lib/components/toolbar/TopBar.svelte';
@@ -50,12 +51,39 @@
     carregarProjeto().then(() => { pronto = true; });
 
     let timeout: ReturnType<typeof setTimeout>;
+    let pendente: Project | null = null;
+
     const unsub = currentProject.subscribe((p) => {
       if (!p) return;
+      pendente = p;
       clearTimeout(timeout);
-      timeout = setTimeout(() => localStore.save(p), DEBOUNCE_SALVAR);
+      timeout = setTimeout(() => { localStore.save(p); pendente = null; }, DEBOUNCE_SALVAR);
     });
-    return () => { unsub(); clearTimeout(timeout); };
+
+    /**
+     * Sem backend, o localStorage é o único lugar onde o projeto existe. Sair antes do
+     * debounce disparar perdia até meio segundo de trabalho — aqui grava na hora.
+     */
+    function gravarPendente() {
+      if (!pendente) return;
+      clearTimeout(timeout);
+      localStore.save(pendente);
+      pendente = null;
+    }
+    const aoEsconder = () => { if (document.visibilityState === 'hidden') gravarPendente(); };
+
+    window.addEventListener('beforeunload', gravarPendente);
+    window.addEventListener('pagehide', gravarPendente);
+    document.addEventListener('visibilitychange', aoEsconder);
+
+    return () => {
+      unsub();
+      clearTimeout(timeout);
+      window.removeEventListener('beforeunload', gravarPendente);
+      window.removeEventListener('pagehide', gravarPendente);
+      document.removeEventListener('visibilitychange', aoEsconder);
+      gravarPendente();
+    };
   });
 
   function aoTeclar(e: KeyboardEvent) {
@@ -65,6 +93,10 @@
 
     if (e.key === 'p' && comModificador) { e.preventDefault(); impressaoAberta = true; }
     if (e.key === 'k' && comModificador) { e.preventDefault(); paletaAberta = !paletaAberta; }
+
+    // Esc fecha a ajuda venha de onde vier o foco — o overlay não fica focado sozinho.
+    if (e.key === 'Escape' && ajudaVisivel) { ajudaVisivel = false; return; }
+
     if (emCampo || comModificador) return;
 
     if (e.key === '/') { e.preventDefault(); paletaAberta = !paletaAberta; }

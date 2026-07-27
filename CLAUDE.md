@@ -113,12 +113,19 @@ corrija antes de seguir.
 ```bash
 npm install
 npm run dev       # http://localhost:5173
-npm run check     # svelte-check + TS — rode antes de commitar
+npm run check     # svelte-check + TS
+npm test          # Playwright: 56 testes de interface (sobe o dev sozinho)
 npm run build
 npm run preview
 ```
 
-Não há suíte de testes. Validação = `npm run check` + verificação manual no navegador.
+**Rode os dois antes de commitar.** `npm run check` valida tipos; `npm test` é o que pega quebra
+de reatividade, prop não repassada e desenho que parou de acontecer — coisas que o compilador não
+enxerga. A suíte já pegou cinco bugs reais, um deles regressão de refatoração
+(`docs/ui/ACHADOS.md`).
+
+Os testes vivem em `tests/e2e/` e geram as capturas de `docs/ui/_evidencias/`, que são a
+documentação de interface. Ao mexer na UI, rode `npm test` — as evidências se atualizam sozinhas.
 
 Deploy: Firebase App Hosting (`apphosting.yaml`, projeto `openplan3d`), `@sveltejs/adapter-node`.
 
@@ -341,13 +348,13 @@ Regras que decorrem disso:
   4. Extrair os tratadores (`onMouseDown` ~400, `onMouseMove` ~270, `onKeyDown` ~252,
      `onMouseUp` ~135) para `editor/canvas/interacao/*.ts`, recebendo `ui`.
 
-  **Não faça as duas de uma vez, e não comece sem o editor testado no navegador.** Sem suíte
-  de testes, empilhar reestruturação sobre mudança não verificada transforma um bug de uma
-  linha numa caça de horas.
+  **Uma etapa por commit, rodando `npm test` entre elas.** A suíte de interface é a rede de
+  segurança que faltava — sem rodá-la, empilhar reestruturação transforma um bug de uma linha
+  numa caça de horas.
 
-- **Sem testes automatizados.** Validação é `npm run check` + verificação manual. Ao criar a
-  primeira suíte, comece pelas funções puras de `utils/` — são as mais fáceis, as mais críticas,
-  e são o que falta para tornar o passo acima seguro.
+- **Sem testes unitários.** Existe suíte de interface (Playwright, 56 testes), mas as funções
+  puras de `utils/` — geometria de parede, detecção de ambiente, encaixe, reconciliação — não têm
+  cobertura direta. São as mais fáceis de testar e as mais fáceis de quebrar em refatoração.
 - `src/lib/firebase.ts` só carrega o Analytics (importado sob demanda em `+layout.svelte`). O
   Firebase aqui é **destino de deploy** (App Hosting), não backend de dados — não confunda os
   dois nem o use como porta de entrada para armazenar projeto fora do navegador.
@@ -358,3 +365,30 @@ Regras que decorrem disso:
 - `agent/*` — desenvolvimento de cada alteração
 - `dev` — QA / homologação (branch atual)
 - `main` — versão aprovada
+
+## 10. Testes de interface
+
+`tests/e2e/` (Playwright) é a única rede de segurança do projeto. Um arquivo por área da UI,
+espelhando `docs/ui/`.
+
+### Regras que mantêm a suíte confiável
+
+- **Nunca `waitForTimeout` para esperar desenho.** O canvas pinta por `requestAnimationFrame`;
+  use `esperarPrimeiroQuadro()` ou `expect.poll`. Espera fixa dá teste que passa na sua máquina
+  e falha na do outro.
+- **Verifique o desenho, não a classe CSS.** `contarPixeis()` lê o canvas com `getImageData`.
+  Um teste que só confere `class="..."` teria passado com o canvas congelado — foi assim que o
+  bug 1 de `ACHADOS.md` sobreviveu tanto tempo.
+- **O `localStorage` é gravado com debounce de 500 ms.** Ao conferir o projeto salvo, use
+  `expect.poll`, nunca leitura direta logo após a ação.
+- **Documente o comportamento atual, não o desejado.** Se algo está errado, o teste registra o
+  que o produto faz e o achado entra em `docs/ui/ACHADOS.md`. Teste que falha de propósito vira
+  ruído e some do radar.
+- **Toda captura sai de teste.** `evidenciar(alvo, area, parametro)` grava em
+  `docs/ui/_evidencias/<area>/<parametro>.png`. Captura feita à mão envelhece calada.
+
+### Ao corrigir um bug
+
+Escreva primeiro o teste que reproduz, confirme que ele falha, depois corrija. E confira contra
+o commit anterior à sua mudança se o bug é **regressão sua** ou **pré-existente** — a distinção
+muda quem precisa ser avisado e entra no registro do achado.

@@ -26,3 +26,8 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Playwright
+tests/.saida/
+/test-results/
+/playwright-report/
