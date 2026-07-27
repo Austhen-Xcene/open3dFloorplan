@@ -9,7 +9,7 @@
 
 | Parâmetro | Padrão | Faixa / opções | Persistência |
 |---|---|---|---|
-| Nome do projeto | `Untitled Project` | texto livre | `localStorage` (auto-save) |
+| Nome do projeto | `Projeto sem nome` | texto livre | `localStorage` (auto-save) |
 | Pavimentos | 1 | ≥ 1 — o último não pode ser excluído | projeto |
 | Zoom | 100 % | 10 % a 1000 %, passo ×1,25 | store `canvasZoom` |
 | Modo do ponteiro | Selecionar | Selecionar \| Mão | store `panMode` |

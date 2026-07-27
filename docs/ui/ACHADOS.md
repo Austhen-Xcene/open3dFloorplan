@@ -60,27 +60,26 @@ fechar".
 **Correção:** `Escape` voltou ao tratador de teclado da página.
 **Teste:** `08-persistencia-exportacao.spec.ts` → "a lista de atalhos abre com ? e fecha com Esc".
 
-## Abertos
-
-### 6. Botão "Girar ambiente" depende de clicar no ambiente na planta
+### 6. Botão "Girar ambiente" só aparecia após clicar no ambiente na planta
 **Origem:** pré-existente · **Gravidade:** baixa (inconsistência)
 
-Inserir um ambiente pelo formulário define `selectedRoomId` — o painel de propriedades abre — mas
-não monta a seleção das 4 paredes. O botão de girar é condicionado a `getMultiSelectBBox()`, que
-exige `currentSelectedIds.size >= 2`. Resultado: logo após inserir, o ambiente está selecionado
-mas o botão de girar não aparece; ele só surge depois de clicar no ambiente na planta.
+Inserir pelo formulário define `selectedRoomId` — o painel de propriedades abre — mas não monta a
+seleção das 4 paredes. O botão era condicionado a `getMultiSelectBBox()`, que exige
+`currentSelectedIds.size >= 2`, então não aparecia.
 
-**Sugestão:** calcular a caixa a partir do polígono do ambiente selecionado, em vez de depender
-da seleção múltipla.
-**Documentado no teste** `05-propriedades.spec.ts` → "botão de girar só aparece depois de clicar
-no ambiente na planta" (o teste registra o comportamento atual, não o desejado).
+**Correção:** `bboxDoAmbienteSelecionado()` calcula a caixa a partir do polígono do ambiente,
+sem depender da seleção múltipla.
+**Teste:** `05-propriedades.spec.ts` → "botão de girar aparece assim que o ambiente é inserido".
 
-### 7. Textos de interface ainda em inglês
+### 7. Textos de interface em inglês
 **Origem:** pré-existente · **Gravidade:** baixa
 
-A paleta de comandos (`CommandPalette.svelte`) ainda usa `Search furniture, tools, actions…`, e as
-categorias do catálogo vêm em inglês (`Living Room`, `Electrical`, `Plumbing`) porque saem direto
-de `furnitureCatalog.ts`. O padrão do projeto é PT-BR (`CLAUDE.md` §2, item 5).
+**Correção:** `Untitled Project` → `Projeto sem nome`, `Ground Floor` → `Térreo`,
+`Floor N` → `Pavimento N`, e o campo da paleta de comandos → `Buscar objetos, ferramentas, ações…`.
 
-**Nota:** as categorias somem sozinhas na troca do catálogo de móveis pelo de equipamentos SHC
-(`CLAUDE.md` §7, passo 2).
+Restam as **categorias do catálogo** (`Living Room`, `Electrical`, `Plumbing`), que saem direto de
+`furnitureCatalog.ts` e somem sozinhas na troca pelo catálogo SHC (`CLAUDE.md` §7, passo 2).
+
+## Abertos
+
+Nenhum.

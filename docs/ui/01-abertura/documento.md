@@ -9,8 +9,8 @@ Rota `/editor`. Sem `?id=`, cria um projeto novo, grava e corrige a URL com `his
 | Parâmetro | Valor | Onde vive | Observação |
 |---|---|---|---|
 | `?id=` | slug de 8 caracteres | URL | Ausente ou desconhecido → cria projeto novo |
-| Nome inicial | `Untitled Project` | `createDefaultProject()` | ⚠️ ainda em inglês |
-| Pavimento inicial | `Ground Floor`, nível 0 | `createDefaultFloor()` | ⚠️ ainda em inglês |
+| Nome inicial | `Projeto sem nome` | `createDefaultProject()` | — |
+| Pavimento inicial | `Térreo`, nível 0 | `createDefaultFloor()` | — |
 | Estado vazio | "Comece a planta da sua casa" | `FloorPlanCanvas` | Some quando existe parede, objeto ou porta |
 | Debounce do auto-save | 500 ms | `routes/editor/+page.svelte` | Com flush ao sair — ver achado 4 |
 

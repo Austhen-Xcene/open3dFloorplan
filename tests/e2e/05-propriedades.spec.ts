@@ -58,25 +58,24 @@ test.describe('Painel de propriedades', () => {
     await evidenciar(painel, AREA, 'medida-recusada');
   });
 
-  test('botão de girar só aparece depois de clicar no ambiente na planta', async ({ page }) => {
+  test('botão de girar aparece assim que o ambiente é inserido', async ({ page }) => {
     const { canvas } = await abrirEditor(page);
     await inserirAmbiente(page, 'Sala', 5, 4);
 
-    // Inserir pelo formulário seleciona o ambiente no painel, mas não monta a
-    // seleção completa das 4 paredes — o botão de girar depende dela.
-    await expect(page.getByRole('button', { name: 'Girar ambiente 90 graus' })).toBeHidden();
+    // A caixa vem do polígono do ambiente, não da seleção múltipla — inserir pelo
+    // formulário já basta.
+    await expect(page.getByRole('button', { name: 'Girar ambiente 90 graus' })).toBeVisible();
+    await evidenciar(page, AREA, 'botao-girar');
 
+    // E continua valendo depois de clicar nele na planta.
     const { x, y } = await centroDoCanvas(canvas);
     await page.mouse.click(x, y);
     await expect(page.getByRole('button', { name: 'Girar ambiente 90 graus' })).toBeVisible();
-    await evidenciar(page, AREA, 'botao-girar');
   });
 
   test('girar 90° troca largura por comprimento', async ({ page }) => {
-    const { canvas } = await abrirEditor(page);
+    await abrirEditor(page);
     await inserirAmbiente(page, 'Sala', 6, 3);
-    const { x, y } = await centroDoCanvas(canvas);
-    await page.mouse.click(x, y);
 
     const painel = page.locator('.fixed.right-0.top-12');
     const larguraAntes = await painel.locator('input[type="number"]').first().inputValue();

@@ -88,7 +88,7 @@ test.describe('Atalhos', () => {
   test('a paleta de comandos abre com Ctrl+K', async ({ page }) => {
     await abrirEditor(page);
     await page.keyboard.press('Control+k');
-    await expect(page.getByPlaceholder(/Search furniture|Buscar/)).toBeVisible();
+    await expect(page.getByPlaceholder(/Buscar objetos/)).toBeVisible();
     await evidenciar(page, AREA, 'paleta-comandos');
   });
 });

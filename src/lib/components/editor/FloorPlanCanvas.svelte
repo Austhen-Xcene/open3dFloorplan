@@ -123,6 +123,24 @@
   /**
    * Compute bounding box of all multi-selected elements.
    */
+  /**
+   * Caixa do ambiente selecionado, a partir do polígono dele.
+   *
+   * Não usa `getMultiSelectBBox` de propósito: inserir pelo formulário seleciona o
+   * ambiente mas não monta a seleção das 4 paredes, e o botão de girar sumia.
+   */
+  function bboxDoAmbienteSelecionado(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    if (!ui.currentSelectedRoomId || !ui.currentFloor) return null;
+    const ambiente = ui.currentFloor.rooms.find((r) => r.id === ui.currentSelectedRoomId)
+      ?? ui.detectedRooms.find((r) => r.id === ui.currentSelectedRoomId);
+    if (!ambiente) return null;
+    const poligono = getRoomPolygon(ambiente, ui.currentFloor.walls);
+    if (poligono.length < 3) return null;
+    const xs = poligono.map((p) => p.x);
+    const ys = poligono.map((p) => p.y);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
   function getMultiSelectBBox(): { minX: number; minY: number; maxX: number; maxY: number } | null {
     if (ui.currentSelectedIds.size < 2 || !ui.currentFloor) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -3227,7 +3245,7 @@
   ></canvas>
 
   {#if ui.currentSelectedRoomId && ui.currentFloor && ui.currentTool === 'select'}
-    {@const bbox = getMultiSelectBBox()}
+    {@const bbox = bboxDoAmbienteSelecionado()}
     {#if bbox}
       {@const pos = worldToScreen((bbox.minX + bbox.maxX) / 2, bbox.minY)}
       <button

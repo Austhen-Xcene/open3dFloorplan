@@ -13,10 +13,10 @@ export function uid(): string {
 
 export function createDefaultFloor(level = 0): Floor {
   const id = uid();
-  return { id, name: level === 0 ? 'Ground Floor' : `Floor ${level}`, level, walls: [], rooms: [], doors: [], windows: [], furniture: [], stairs: [], columns: [], guides: [], measurements: [], annotations: [], textAnnotations: [], groups: [] };
+  return { id, name: level === 0 ? 'Térreo' : `Pavimento ${level}`, level, walls: [], rooms: [], doors: [], windows: [], furniture: [], stairs: [], columns: [], guides: [], measurements: [], annotations: [], textAnnotations: [], groups: [] };
 }
 
-export function createDefaultProject(name = 'Untitled Project'): Project {
+export function createDefaultProject(name = 'Projeto sem nome'): Project {
   const floor = createDefaultFloor();
   return {
     id: uid(),

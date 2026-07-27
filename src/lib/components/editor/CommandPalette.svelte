@@ -130,7 +130,7 @@
           bind:value={query}
           onkeydown={onKeydown}
           class="flex-1 bg-transparent outline-none text-sm text-gray-800 placeholder-gray-400"
-          placeholder="Search furniture, tools, actions…"
+          placeholder="Buscar objetos, ferramentas, ações…"
           type="text"
           spellcheck="false"
         />
